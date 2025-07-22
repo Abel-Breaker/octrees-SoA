@@ -53,10 +53,10 @@ void searchBenchmark(std::ofstream &outputFile, EncoderType encoding = EncoderTy
     // Sort the point cloud
     auto [codes, box] = enc.sortPoints(points, metadata);
     // Prepare the search set (must be done after sorting since it indexes points)
-    SearchSet searchSet = SearchSet(mainOptions.numSearches, points.size());
+    //SearchSet searchSet = SearchSet(mainOptions.numSearches, points.size());
     // Run the benchmarks
-    NeighborsBenchmark octreeBenchmarks(points, codes, box, enc, searchSet, outputFile);   
-    octreeBenchmarks.runAllBenchmarks();    
+    //NeighborsBenchmark octreeBenchmarks(points, codes, box, enc, searchSet, outputFile);   
+    //octreeBenchmarks.runAllBenchmarks();    
 }
 
 /**
