@@ -225,6 +225,12 @@ public:
                 // Step 1: Histogram
                 #pragma omp parallel
                 {
+                    #pragma omp single
+                    {
+                        printf("Número de hilos usando para ordenar: %d\n", omp_get_num_threads());
+                    }
+                    
+
                     auto &hist = localHist[omp_get_thread_num()];
                     #pragma omp for nowait schedule(static)
                     for (size_t i = 0; i < n; ++i)

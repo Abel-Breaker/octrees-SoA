@@ -394,6 +394,7 @@ void testContainersMemLayout(EncoderType encoding = EncoderType::NO_ENCODING) {
 int main(int argc, char *argv[]) {
     // Set default OpenMP schedule: dynamic and auto chunk size
     omp_set_schedule(omp_sched_dynamic, 0);
+    printf("Número de hilos máximo: %d\n", omp_get_max_threads());
     processArgs(argc, argv);
     std::cout << std::fixed << std::setprecision(3); 
     if(mainOptions.cacheProfiling) {
