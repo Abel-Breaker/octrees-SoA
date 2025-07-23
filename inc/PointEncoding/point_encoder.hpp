@@ -234,9 +234,9 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
 
                 // Second Iteration
                 // Cargar 8 valores de cada coordenada
-                pointsX = _mm512_load_pd(soa->dataX() + i + 8);
-                pointsY = _mm512_load_pd(soa->dataY() + i + 8);
-                pointsZ = _mm512_load_pd(soa->dataZ() + i + 8);
+                pointsX = _mm512_loadu_pd(soa->dataX() + i + 8);
+                pointsY = _mm512_loadu_pd(soa->dataY() + i + 8);
+                pointsZ = _mm512_loadu_pd(soa->dataZ() + i + 8);
 
                 printf("Medio\n");
 
