@@ -219,8 +219,8 @@ public:
         key_hi = _mm512_slli_epi64(key_hi, 3);
 
         // Combinar (OR) con los valores convertidos
-        key_lo = _mm512_or_si512(key_lo, mth64_lo);
-        key_hi = _mm512_or_si512(key_hi, mth64_hi);
+        key_lo = _mm512_or_si512(key_lo, hilbertVals_lo);
+        key_hi = _mm512_or_si512(key_hi, hilbertVals_hi);
 
         // === Bit manipulation: Karnaugh-style operations ===
 
