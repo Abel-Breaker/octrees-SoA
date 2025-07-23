@@ -178,8 +178,8 @@ public:
     __m512i one = _mm512_set1_epi32(1);
     __m512i key = _mm512_setzero_si512();
 
-    __m512i key_lo;
-    __m512i key_hi;
+    key_lo = _mm512_setzero_si512();
+    key_hi = _mm512_setzero_si512();
 
     alignas(64) uint32_t tx[16], ty[16], tz[16];
     alignas(64) uint32_t octants[16];
@@ -211,8 +211,8 @@ public:
         __m256i lo = _mm512_castsi512_si256(hilbertVals);       // primeros 8
         __m256i hi = _mm512_extracti32x8_epi32(hilbertVals, 1); // últimos 8
 
-        __m256i hilbertVals_lo = _mm512_cvtepu32_epi64(lo); // 8 x uint64_t
-        __m256i hilbertVals_hi = _mm512_cvtepu32_epi64(hi); // 8 x uint64_t
+        __m512i hilbertVals_lo = _mm512_cvtepu32_epi64(lo); // 8 x uint64_t
+        __m512i hilbertVals_hi = _mm512_cvtepu32_epi64(hi); // 8 x uint64_t
 
         // Desplazar las claves actuales (64-bit) 3 bits a la izquierda
         key_lo = _mm512_slli_epi64(key_lo, 3);
