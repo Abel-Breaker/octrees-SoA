@@ -200,6 +200,7 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
                 __m512d pointsX = _mm512_load_pd(soa->dataX() + i);
                 __m512d pointsY = _mm512_load_pd(soa->dataY() + i);
                 __m512d pointsZ = _mm512_load_pd(soa->dataZ() + i);
+                printf("principio\n");
 
                 // ((p - center) + radii) / (2 * radii)
                 __m512d x_transf = _mm512_div_pd(
@@ -237,6 +238,8 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
                 pointsY = _mm512_load_pd(soa->dataY() + i + 8);
                 pointsZ = _mm512_load_pd(soa->dataZ() + i + 8);
 
+                printf("Medio\n");
+
                 // ((p - center) + radii) / (2 * radii)
                 x_transf = _mm512_div_pd(
                     _mm512_add_pd(_mm512_sub_pd(pointsX, bboxCenterX), bboxRadiiX),
@@ -267,6 +270,7 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
                     z[j+8] = static_cast<coords_t>(z_vals[j]);
                 }
 
+                printf("Final\n");
                 encodeVectorizedAVX512(x, y, z, keys, i);
             }
 
