@@ -256,9 +256,9 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
                 z_scaled = _mm512_min_pd(_mm512_mul_pd(z_transf, scale), maxCoord);
 
                 // Conversión a uint32_t con truncamiento
-                __m256i xs = _mm512_cvttpd_epu32(x_scaled);
-                __m256i ys = _mm512_cvttpd_epu32(y_scaled);
-                __m256i zs = _mm512_cvttpd_epu32(z_scaled);
+                xs = _mm512_cvttpd_epu32(x_scaled);
+                ys = _mm512_cvttpd_epu32(y_scaled);
+                zs = _mm512_cvttpd_epu32(z_scaled);
 
                 // Extraer e imprimir los resultados
                 _mm256_store_si256((__m256i *)x[8], xs);
