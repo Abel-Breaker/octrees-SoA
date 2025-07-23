@@ -177,6 +177,115 @@ public:
 
     __m512i one = _mm512_set1_epi32(1);
 
+    // A constant array duplicated (for avx use) to map adequately rotated x, y, z coordinates to their corresponding octant 
+    __m512i lookup_table_mortonToHilbert = _mm512_setr_epi32(
+        0, 1, 3, 2, 7, 6, 4, 5, // Only use this
+        0, 1, 3, 2, 7, 6, 4, 5 // Duplicated for AVX512 (not used)
+    );
+
+    __m512i key_lo = _mm512_setzero_si512();
+    __m512i key_hi = _mm512_setzero_si512();
+
+    alignas(64) uint32_t tx[16], ty[16], tz[16];
+    alignas(64) uint32_t octants[16];
+    alignas(64) uint32_t mthVals[16];
+
+
+    for (int level = MAX_DEPTH - 1; level >= 0; --level)
+    {
+        __m512i shift = _mm512_set1_epi32(level);
+
+        // xi, yi, zi = (coord >> shift) & 1
+        __m512i xi = _mm512_and_epi32(_mm512_srlv_epi32(vx, shift), one);
+        __m512i yi = _mm512_and_epi32(_mm512_srlv_epi32(vy, shift), one);
+        __m512i zi = _mm512_and_epi32(_mm512_srlv_epi32(vz, shift), one);
+
+        __m512i xi2 = _mm512_slli_epi32(xi, 2);
+        __m512i yi1 = _mm512_slli_epi32(yi, 1);
+        __m512i octant = _mm512_or_epi32(_mm512_or_epi32(xi2, yi1), zi);
+
+        // Utilice octant indexs (16 x [0-7]) to acces the first part of the lookup table
+        __m512i hilbertVals = _mm512_permutexvar_epi32(octant, lookup_table_mortonToHilbert);
+
+        // Convertir hilbertVals (16 x uint32_t) → dos vectores de 8 x uint64_t
+        __m256i lo = _mm512_castsi512_si256(hilbertVals);       // primeros 8
+        __m256i hi = _mm512_extracti32x8_epi32(hilbertVals, 1); // últimos 8
+
+        __m512i hilbertVals_lo = _mm512_cvtepu32_epi64(lo); // 8 x uint64_t
+        __m512i hilbertVals_hi = _mm512_cvtepu32_epi64(hi); // 8 x uint64_t
+
+        // Desplazar las claves actuales (64-bit) 3 bits a la izquierda
+        key_lo = _mm512_slli_epi64(key_lo, 3);
+        key_hi = _mm512_slli_epi64(key_hi, 3);
+
+        // Combinar (OR) con los valores convertidos
+        key_lo = _mm512_or_si512(key_lo, hilbertVals_lo);
+        key_hi = _mm512_or_si512(key_hi, hilbertVals_hi);
+
+        // === Bit manipulation: Karnaugh-style operations ===
+
+        // Recompute masks
+        __m512i not_yi = _mm512_xor_epi32(yi, one);
+        __m512i not_zi = _mm512_xor_epi32(zi, one);
+
+        // X
+        __m512i cond_x = _mm512_and_epi32(xi, _mm512_or_epi32(not_yi, zi));
+        vx = _mm512_xor_epi32(vx, _mm512_maskz_set1_epi32(_mm512_cmpeq_epi32_mask(cond_x, one), -1));
+
+        // Y
+        __m512i cond_y = _mm512_or_epi32(
+            _mm512_and_epi32(xi, _mm512_or_epi32(yi, zi)),
+            _mm512_and_epi32(yi, not_zi)
+        );
+        vy = _mm512_xor_epi32(vy, _mm512_maskz_set1_epi32(_mm512_cmpeq_epi32_mask(cond_y, one), -1));
+
+        // Z
+        __m512i cond_z = _mm512_or_epi32(
+            _mm512_and_epi32(xi, _mm512_and_epi32(not_yi, not_zi)),
+            _mm512_and_epi32(yi, not_zi)
+        );
+        vz = _mm512_xor_epi32(vz, _mm512_maskz_set1_epi32(_mm512_cmpeq_epi32_mask(cond_z, one), -1));
+
+        // Store for scalar rotation
+        _mm512_store_si512((__m512i *)tx, vx);
+        _mm512_store_si512((__m512i *)ty, vy);
+        _mm512_store_si512((__m512i *)tz, vz);
+        _mm512_store_si512((__m512i *)octants, zi); // reusing octants buffer for zi
+        _mm512_store_si512((__m512i *)mthVals, yi); // reusing mthVals buffer for yi
+
+        for (int j = 0; j < 16; ++j)
+        {
+            if (octants[j])
+            {
+                uint32_t tmp = tx[j];
+                tx[j] = ty[j];
+                ty[j] = tz[j];
+                tz[j] = tmp;
+            }
+            else if (!mthVals[j])
+            {
+                std::swap(tx[j], tz[j]);
+            }
+        }
+
+        // Reload rotated vectors
+        vx = _mm512_load_si512((__m512i *)tx);
+        vy = _mm512_load_si512((__m512i *)ty);
+        vz = _mm512_load_si512((__m512i *)tz);
+    }
+
+    // Store final key (two 256-bit stores for 8x uint64_t keys)
+    _mm512_storeu_si512((__m512i *)&keys[i], key_lo);
+    _mm512_storeu_si512((__m512i *)&keys[i+8], key_hi);
+}
+/*void encodeVectorizedAVX512(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const override
+{
+    __m512i vx = _mm512_loadu_si512((__m512i *)x);
+    __m512i vy = _mm512_loadu_si512((__m512i *)y);
+    __m512i vz = _mm512_loadu_si512((__m512i *)z);
+
+    __m512i one = _mm512_set1_epi32(1);
+
     __m512i key_lo = _mm512_setzero_si512();
     __m512i key_hi = _mm512_setzero_si512();
 
@@ -277,7 +386,7 @@ public:
     // Store final key (two 256-bit stores for 8x uint64_t keys)
     _mm512_storeu_si512((__m512i *)&keys[i], key_lo);
     _mm512_storeu_si512((__m512i *)&keys[i+8], key_hi);
-}
+}*/
 
     /// @brief Decodes the given key and puts the coordinates into x, y, z
     void decode(key_t code, coords_t &x, coords_t &y, coords_t &z) const override {
