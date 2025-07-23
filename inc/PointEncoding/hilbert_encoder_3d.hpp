@@ -211,8 +211,16 @@ public:
         __m256i lo = _mm512_castsi512_si256(hilbertVals);       // primeros 8
         __m256i hi = _mm512_extracti32x8_epi32(hilbertVals, 1); // últimos 8
 
-        key_lo = _mm512_cvtepu32_epi64(lo); // 8 x uint64_t
-        key_hi = _mm512_cvtepu32_epi64(hi); // 8 x uint64_t
+        __m256i hilbertVals_lo = _mm512_cvtepu32_epi64(lo); // 8 x uint64_t
+        __m256i hilbertVals_hi = _mm512_cvtepu32_epi64(hi); // 8 x uint64_t
+
+        // Desplazar las claves actuales (64-bit) 3 bits a la izquierda
+        key_lo = _mm512_slli_epi64(key_lo, 3);
+        key_hi = _mm512_slli_epi64(key_hi, 3);
+
+        // Combinar (OR) con los valores convertidos
+        key_lo = _mm512_or_si512(key_lo, mth64_lo);
+        key_hi = _mm512_or_si512(key_hi, mth64_hi);
 
         // === Bit manipulation: Karnaugh-style operations ===
 
