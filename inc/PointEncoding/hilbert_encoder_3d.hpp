@@ -176,10 +176,9 @@ public:
     __m512i vz = _mm512_loadu_si512((__m512i *)z);
 
     __m512i one = _mm512_set1_epi32(1);
-    __m512i key = _mm512_setzero_si512();
 
-    key_lo = _mm512_setzero_si512();
-    key_hi = _mm512_setzero_si512();
+    __m512i key_lo = _mm512_setzero_si512();
+    __m512i key_hi = _mm512_setzero_si512();
 
     alignas(64) uint32_t tx[16], ty[16], tz[16];
     alignas(64) uint32_t octants[16];
