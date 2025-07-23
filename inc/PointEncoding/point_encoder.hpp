@@ -220,16 +220,15 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
                 __m512d y_scaled = _mm512_min_pd(_mm512_mul_pd(y_transf, scale), maxCoord);
                 __m512d z_scaled = _mm512_min_pd(_mm512_mul_pd(z_transf, scale), maxCoord);
 
-                // Guardar resultados temporales
-                _mm512_store_pd(x_vals, x_scaled);
-                _mm512_store_pd(y_vals, y_scaled);
-                _mm512_store_pd(z_vals, z_scaled);
+                // Conversión a uint32_t con truncamiento
+                __m256i xs = _mm512_cvttpd_epu32(x_scaled);
+                __m256i ys = _mm512_cvttpd_epu32(y_scaled);
+                __m256i zs = _mm512_cvttpd_epu32(z_scaled);
 
-                for (int j = 0; j < 8; ++j) {
-                    x[j] = static_cast<coords_t>(x_vals[j]);
-                    y[j] = static_cast<coords_t>(y_vals[j]);
-                    z[j] = static_cast<coords_t>(z_vals[j]);
-                }
+                // Extraer e imprimir los resultados
+                _mm256_store_si256((__m256i *)x, xs);
+                _mm256_store_si256((__m256i *)y, ys);
+                _mm256_store_si256((__m256i *)z, zs);
 
                 // Second Iteration
                 // Cargar 8 valores de cada coordenada
@@ -256,16 +255,15 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
                 y_scaled = _mm512_min_pd(_mm512_mul_pd(y_transf, scale), maxCoord);
                 z_scaled = _mm512_min_pd(_mm512_mul_pd(z_transf, scale), maxCoord);
 
-                // Guardar resultados temporales
-                _mm512_store_pd(x_vals, x_scaled);
-                _mm512_store_pd(y_vals, y_scaled);
-                _mm512_store_pd(z_vals, z_scaled);
+                // Conversión a uint32_t con truncamiento
+                __m256i xs = _mm512_cvttpd_epu32(x_scaled);
+                __m256i ys = _mm512_cvttpd_epu32(y_scaled);
+                __m256i zs = _mm512_cvttpd_epu32(z_scaled);
 
-                for (int j = 0; j < 8; ++j) {
-                    x[j+8] = static_cast<coords_t>(x_vals[j]);
-                    y[j+8] = static_cast<coords_t>(y_vals[j]);
-                    z[j+8] = static_cast<coords_t>(z_vals[j]);
-                }
+                // Extraer e imprimir los resultados
+                _mm256_store_si256((__m256i *)x[8], xs);
+                _mm256_store_si256((__m256i *)y[8], ys);
+                _mm256_store_si256((__m256i *)z[8], zs);
 
                 encodeVectorizedAVX512(x, y, z, keys, i);
             }
