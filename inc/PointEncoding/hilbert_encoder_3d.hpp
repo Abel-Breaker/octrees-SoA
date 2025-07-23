@@ -184,11 +184,9 @@ public:
     alignas(64) uint32_t octants[16];
     alignas(64) uint32_t mthVals[16];
 
-    printf("LLegué\n");
 
     for (int level = MAX_DEPTH - 1; level >= 0; --level)
     {
-        printf("Iter\n");
         __m512i shift = _mm512_set1_epi32(level);
 
         // xi, yi, zi = (coord >> shift) & 1
