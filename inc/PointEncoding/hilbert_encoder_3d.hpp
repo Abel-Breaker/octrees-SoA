@@ -178,6 +178,9 @@ public:
     __m512i one = _mm512_set1_epi32(1);
     __m512i key = _mm512_setzero_si512();
 
+    __m512i key_lo;
+    __m512i key_hi;
+
     alignas(64) uint32_t tx[16], ty[16], tz[16];
     alignas(64) uint32_t octants[16];
     alignas(64) uint32_t mthVals[16];
@@ -194,9 +197,6 @@ public:
         __m512i xi2 = _mm512_slli_epi32(xi, 2);
         __m512i yi1 = _mm512_slli_epi32(yi, 1);
         __m512i octant = _mm512_or_epi32(_mm512_or_epi32(xi2, yi1), zi);
-
-        __m512i key_lo;
-        __m512i key_hi;
 
         // Store octant to array
         _mm512_store_si512((__m512i *)octants, octant);
