@@ -220,15 +220,17 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
                 __m512d y_scaled = _mm512_min_pd(_mm512_mul_pd(y_transf, scale), maxCoord);
                 __m512d z_scaled = _mm512_min_pd(_mm512_mul_pd(z_transf, scale), maxCoord);
 
-                // Conversión a uint32_t con truncamiento (double → uint32)
-                __m256i xs = _mm512_cvttpd_epu32(x_scaled);
-                __m256i ys = _mm512_cvttpd_epu32(y_scaled);
-                __m256i zs = _mm512_cvttpd_epu32(z_scaled);
+                // Convertir double a uint32_t (truncando)
+                __m256i x_uint = _mm512_cvttpd_epu32(x_scaled);
+                __m256i y_uint = _mm512_cvttpd_epu32(y_scaled);
+                __m256i z_uint = _mm512_cvttpd_epu32(z_scaled);
 
-                // Almacenar en las primeras 8 posiciones
-                _mm256_store_si256((__m256i *)&x[0], xs);
-                _mm256_store_si256((__m256i *)&y[0], ys);
-                _mm256_store_si256((__m256i *)&z[0], zs);
+                printf("Hola\n");
+                // Almacenar los resultados convertidos
+                _mm256_storeu_si256((__m256i *)x, x_uint);
+                _mm256_storeu_si256((__m256i *)y, y_uint);
+                _mm256_storeu_si256((__m256i *)z, z_uint);
+                printf("Cargados\n");
 
                 // Second Iteration
                 // Cargar 8 valores de cada coordenada
@@ -256,14 +258,15 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
                 z_scaled = _mm512_min_pd(_mm512_mul_pd(z_transf, scale), maxCoord);
 
                 // Conversión a uint32_t con truncamiento
-                xs = _mm512_cvttpd_epu32(x_scaled);
-                ys = _mm512_cvttpd_epu32(y_scaled);
-                zs = _mm512_cvttpd_epu32(z_scaled);
+                x_uint = _mm512_cvttpd_epu32(x_scaled);
+                y_uint = _mm512_cvttpd_epu32(y_scaled);
+                z_uint = _mm512_cvttpd_epu32(z_scaled);
 
                 // Extraer e imprimir los resultados
-                _mm256_storeu_si256((__m256i *)x[8], xs);
-                _mm256_storeu_si256((__m256i *)y[8], ys);
-                _mm256_storeu_si256((__m256i *)z[8], zs);
+                _mm256_storeu_si256((__m256i *)x[8], x_uint);
+                _mm256_storeu_si256((__m256i *)y[8], y_uint);
+                _mm256_storeu_si256((__m256i *)z[8], z_uint);
+                printf("Cargados2\n");
 
                 encodeVectorizedAVX512(x, y, z, keys, i);
             }
