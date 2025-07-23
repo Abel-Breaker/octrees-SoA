@@ -197,10 +197,10 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
                 alignas(64) uint32_t x[16], y[16], z[16];
 
                 // Cargar 8 valores de cada coordenada
-                __m512d pointsX = _mm512_load_pd(soa->dataX() + i);
-                __m512d pointsY = _mm512_load_pd(soa->dataY() + i);
-                __m512d pointsZ = _mm512_load_pd(soa->dataZ() + i);
-                printf("principio\n");
+                __m512d pointsX = _mm512_loadu_pd(soa->dataX() + i);
+                __m512d pointsY = _mm512_loadu_pd(soa->dataY() + i);
+                __m512d pointsZ = _mm512_loadu_pd(soa->dataZ() + i);
+                //printf("principio\n");
 
                 // ((p - center) + radii) / (2 * radii)
                 __m512d x_transf = _mm512_div_pd(
@@ -238,7 +238,7 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
                 pointsY = _mm512_load_pd(soa->dataY() + i + 8);
                 pointsZ = _mm512_load_pd(soa->dataZ() + i + 8);
 
-                printf("Medio\n");
+                //printf("Medio\n");
 
                 // ((p - center) + radii) / (2 * radii)
                 x_transf = _mm512_div_pd(
@@ -270,7 +270,7 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
                     z[j+8] = static_cast<coords_t>(z_vals[j]);
                 }
 
-                printf("Final\n");
+                //printf("Final\n");
                 encodeVectorizedAVX512(x, y, z, keys, i);
             }
 
