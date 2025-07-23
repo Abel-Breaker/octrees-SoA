@@ -195,6 +195,9 @@ public:
         __m512i yi1 = _mm512_slli_epi32(yi, 1);
         __m512i octant = _mm512_or_epi32(_mm512_or_epi32(xi2, yi1), zi);
 
+        __m512i key_lo;
+        __m512i key_hi;
+
         // Store octant to array
         _mm512_store_si512((__m512i *)octants, octant);
 
@@ -208,11 +211,8 @@ public:
         __m256i lo = _mm512_castsi512_si256(hilbertVals);       // primeros 8
         __m256i hi = _mm512_extracti32x8_epi32(hilbertVals, 1); // últimos 8
 
-        __m512i hilbertVals64_lo = _mm512_cvtepu32_epi64(lo); // 8 x uint64_t
-        __m512i hilbertVals64_hi = _mm512_cvtepu32_epi64(hi); // 8 x uint64_t
-
-        // Save combined key back
-        key = _mm512_inserti64x4(_mm512_castsi256_si512(_mm512_castsi512_si256(hilbertVals64_lo)), _mm512_castsi512_si256(hilbertVals64_hi), 1);
+        key_lo = _mm512_cvtepu32_epi64(lo); // 8 x uint64_t
+        key_hi = _mm512_cvtepu32_epi64(hi); // 8 x uint64_t
 
         // === Bit manipulation: Karnaugh-style operations ===
 
@@ -267,7 +267,8 @@ public:
     }
 
     // Store final key (two 256-bit stores for 8x uint64_t keys)
-    _mm512_storeu_si512((__m512i *)&keys[i], key);
+    _mm512_storeu_si512((__m512i *)&keys[i], key_lo);
+    _mm512_storeu_si512((__m512i *)&keys[i+8], key_hi);
 }
 
     /// @brief Decodes the given key and puts the coordinates into x, y, z
