@@ -201,7 +201,7 @@ public:
         __m512i yi1 = _mm512_slli_epi32(yi, 1);
         __m512i octant = _mm512_or_epi32(_mm512_or_epi32(xi2, yi1), zi);*/
 
-        __m512i octant = _mm512_ternarylogic_epi32(xi, yi, zi, 0xE4);
+        __m512i octant = _mm512_ternarylogic_epi32(xi, yi, zi, 0xFE);
 
         // Utilice octant indexs (16 x [0-7]) to acces the first part of the lookup table
         __m512i hilbertVals = _mm512_permutexvar_epi32(octant, lookup_table_mortonToHilbert);
