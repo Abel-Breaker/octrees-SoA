@@ -125,34 +125,52 @@ public:
                                              _mm256_and_si256(yi, not_zi));
             __m256i mask_z = _mm256_sub_epi32(_mm256_setzero_si256(), cond_z);
             vz = _mm256_xor_si256(vz, mask_z);
+            /*
+                        // Rotation or swap
+                        _mm256_store_si256((__m256i *)zi_arr, zi);
+                        _mm256_store_si256((__m256i *)yi_arr, yi);
 
-            // Rotation or swap
-            _mm256_store_si256((__m256i *)zi_arr, zi);
-            _mm256_store_si256((__m256i *)yi_arr, yi);
+                        alignas(32) uint32_t tx[8], ty[8], tz[8];
+                        _mm256_store_si256((__m256i *)tx, vx);
+                        _mm256_store_si256((__m256i *)ty, vy);
+                        _mm256_store_si256((__m256i *)tz, vz);
 
-            alignas(32) uint32_t tx[8], ty[8], tz[8];
-            _mm256_store_si256((__m256i *)tx, vx);
-            _mm256_store_si256((__m256i *)ty, vy);
-            _mm256_store_si256((__m256i *)tz, vz);
+                        for (int j = 0; j < 8; ++j)
+                        {
+                            if (zi_arr[j])
+                            {
+                                uint32_t tmp = tx[j];
+                                tx[j] = ty[j];
+                                ty[j] = tz[j];
+                                tz[j] = tmp;
+                            }
+                            else if (!yi_arr[j])
+                            {
+                                std::swap(tx[j], tz[j]);
+                            }
+                        }
 
-            for (int j = 0; j < 8; ++j)
-            {
-                if (zi_arr[j])
-                {
-                    uint32_t tmp = tx[j];
-                    tx[j] = ty[j];
-                    ty[j] = tz[j];
-                    tz[j] = tmp;
-                }
-                else if (!yi_arr[j])
-                {
-                    std::swap(tx[j], tz[j]);
-                }
-            }
+                        vx = _mm256_load_si256((__m256i *)tx);
+                        vy = _mm256_load_si256((__m256i *)ty);
+                        vz = _mm256_load_si256((__m256i *)tz);*/
 
-            vx = _mm256_load_si256((__m256i *)tx);
-            vy = _mm256_load_si256((__m256i *)ty);
-            vz = _mm256_load_si256((__m256i *)tz);
+            // Máscaras booleanas
+            __m256i mask_z = zi; // zi ≠ 0 → hacer rotación
+            __m256i not_mask_z = _mm256_cmpeq_epi32(mask_z, _mm256_setzero_si256());
+            __m256i not_y = _mm256_cmpeq_epi32(yi, _mm256_setzero_si256());
+            __m256i mask_swap = _mm256_and_si256(not_mask_z, not_y); // zi == 0 && yi == 0
+
+            // Rotación cuando zi ≠ 0: tx = ty, ty = tz, tz = tx
+            __m256i new_tx = _mm256_blendv_epi8(vx, vy, mask_z);
+            __m256i new_ty = _mm256_blendv_epi8(vy, vz, mask_z);
+            __m256i new_tz = _mm256_blendv_epi8(vz, vx, mask_z);
+
+            // Swap tx ↔ tz si zi == 0 && yi == 0
+            vx = _mm256_blendv_epi8(new_tx, new_tz, mask_swap); // nuevo vx (tx)
+            vz = _mm256_blendv_epi8(new_tz, new_tx, mask_swap); // nuevo vz (tz)
+
+            // vy solo cambia si hubo rotación
+            vy = new_ty;
         }
 
         // Store the final key
