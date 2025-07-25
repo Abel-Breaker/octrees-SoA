@@ -137,15 +137,19 @@ public:
 
             // Paso 2: Rotación condicional: tx = ty, ty = tz, tz = tx (original) cuando zi == 1
             __m256i tx_orig = vx;
-            vx = _mm256_blendv_epi8(vx, vy, rot_mask);      // tx = ty
-            vy = _mm256_blendv_epi8(vy, vz, rot_mask);      // ty = tz
-            vz = _mm256_blendv_epi8(vz, tx_orig, rot_mask); // tz = tx original
+            __m256i new_tx = _mm256_blendv_epi8(vx, vy, rot_mask);      // tx = ty
+            __m256i new_ty = _mm256_blendv_epi8(vy, vz, rot_mask);      // ty = tz
+            __m256i new_tz = _mm256_blendv_epi8(vz, tx_orig, rot_mask); // tz = tx original
 
+            vx = new_tx;
+            vy = new_ty;
+            vz = new_tz;
 
             // Paso 3: Swap condicional entre tx y tz cuando (!zi && !yi)
-            __m256i vx = _mm256_blendv_epi8(vx, vz, swap_mask); // tmp = vz where mask
-            __m256i vz = _mm256_blendv_epi8(vz, vx, swap_mask); // vz = vx where mask
-
+            __m256i tmp_vx = _mm256_blendv_epi8(vx, vz, swap_mask); // tmp = vz where mask
+            __m256i tmp_vz = _mm256_blendv_epi8(vz, vx, swap_mask); // vz = vx where mask
+            vx = tmp_vx;
+            vz = tmp_vz; 
         }
 
         // Store the final key
