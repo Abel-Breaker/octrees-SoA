@@ -168,9 +168,9 @@ public:
 
             // Paso 2: Rotación condicional: tx = ty, ty = tz, tz = tx (original) cuando zi == 1
             __m256i tx_orig = vx;
-            __m256i new_tx = _mm256_blendv_epi8(vx, vy, zi);      // tx = ty
-            __m256i new_ty = _mm256_blendv_epi8(vy, vz, zi);      // ty = tz
-            __m256i new_tz = _mm256_blendv_epi8(vz, tx_orig, zi); // tz = tx original
+            __m256i new_tx = _mm256_blendv_epi8(vx, vy, rot_mask);      // tx = ty
+            __m256i new_ty = _mm256_blendv_epi8(vy, vz, rot_mask);      // ty = tz
+            __m256i new_tz = _mm256_blendv_epi8(vz, tx_orig, rot_mask); // tz = tx original
 
             vx = new_tx;
             vy = new_ty;
