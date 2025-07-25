@@ -154,22 +154,36 @@ public:
                         vy = _mm256_load_si256((__m256i *)ty);
                         vz = _mm256_load_si256((__m256i *)tz);*/
 
-            // Máscaras booleanas
-            __m256i not_mask_z = _mm256_cmpeq_epi32(zi, _mm256_setzero_si256());
-            __m256i not_y = _mm256_cmpeq_epi32(yi, _mm256_setzero_si256());
-            __m256i mask_swap = _mm256_and_si256(not_mask_z, not_y); // zi == 0 && yi == 0
+            // Paso 1: ya tienes zi y yi como __m256i (valores 0 o 1 por cada elemento)
+            // Crear máscaras de 0xFFFFFFFF o 0x00000000 por elemento para usar en blendv
+            __m256i zero = _mm256_setzero_si256();
+            __m256i full = _mm256_set1_epi32(-1);                        // 0xFFFFFFFF
+            __m256i not_zi = _mm256_xor_si256(zi, _mm256_set1_epi32(1)); // !zi
+            __m256i not_yi = _mm256_xor_si256(yi, _mm256_set1_epi32(1)); // !yi
 
-            // Rotación cuando zi ≠ 0: tx = ty, ty = tz, tz = tx
-            __m256i new_tx = _mm256_blendv_epi8(vx, vy, zi);
-            __m256i new_ty = _mm256_blendv_epi8(vy, vz, zi);
-            __m256i new_tz = _mm256_blendv_epi8(vz, vx, zi);
+            // rot_mask = zi ? 0xFFFFFFFF : 0x00000000
+            __m256i rot_mask = _mm256_cmpeq_epi32(zi, _mm256_set1_epi32(1));
 
-            // Swap tx ↔ tz si zi == 0 && yi == 0
-            vx = _mm256_blendv_epi8(new_tx, new_tz, mask_swap); // nuevo vx (tx)
-            vz = _mm256_blendv_epi8(new_tz, new_tx, mask_swap); // nuevo vz (tz)
+            // swap_mask = (!zi && !yi) ? 0xFFFFFFFF : 0x00000000
+            __m256i swap_mask = _mm256_and_si256(
+                _mm256_cmpeq_epi32(zi, zero),
+                _mm256_cmpeq_epi32(yi, zero));
 
-            // vy solo cambia si hubo rotación
+            // Paso 2: Rotación condicional: tx = ty, ty = tz, tz = tx (original) cuando zi == 1
+            __m256i tx_orig = vx;
+            __m256i new_tx = _mm256_blendv_epi8(vx, vy, rot_mask);      // tx = ty
+            __m256i new_ty = _mm256_blendv_epi8(vy, vz, rot_mask);      // ty = tz
+            __m256i new_tz = _mm256_blendv_epi8(vz, tx_orig, rot_mask); // tz = tx original
+
+            vx = new_tx;
             vy = new_ty;
+            vz = new_tz;
+
+            // Paso 3: Swap condicional entre tx y tz cuando (!zi && !yi)
+            __m256i tmp_vx = _mm256_blendv_epi8(vx, vz, swap_mask); // tmp = vz where mask
+            __m256i tmp_vz = _mm256_blendv_epi8(vz, vx, swap_mask); // vz = vx where mask
+            vx = tmp_vx;
+            vz = tmp_vz; 
         }
 
         // Store the final key
