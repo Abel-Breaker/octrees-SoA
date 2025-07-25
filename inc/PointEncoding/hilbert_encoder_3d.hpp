@@ -157,7 +157,6 @@ public:
             // Paso 1: ya tienes zi y yi como __m256i (valores 0 o 1 por cada elemento)
             // Crear máscaras de 0xFFFFFFFF o 0x00000000 por elemento para usar en blendv
             __m256i zero = _mm256_setzero_si256();
-            __m256i full = _mm256_set1_epi32(-1);                        // 0xFFFFFFFF
 
             // rot_mask = zi ? 0xFFFFFFFF : 0x00000000
             __m256i rot_mask = _mm256_cmpeq_epi32(zi, _mm256_set1_epi32(1));
@@ -169,9 +168,9 @@ public:
 
             // Paso 2: Rotación condicional: tx = ty, ty = tz, tz = tx (original) cuando zi == 1
             __m256i tx_orig = vx;
-            __m256i new_tx = _mm256_blendv_epi8(vx, vy, rot_mask);      // tx = ty
-            __m256i new_ty = _mm256_blendv_epi8(vy, vz, rot_mask);      // ty = tz
-            __m256i new_tz = _mm256_blendv_epi8(vz, tx_orig, rot_mask); // tz = tx original
+            __m256i new_tx = _mm256_blendv_epi8(vx, vy, zi);      // tx = ty
+            __m256i new_ty = _mm256_blendv_epi8(vy, vz, zi);      // ty = tz
+            __m256i new_tz = _mm256_blendv_epi8(vz, tx_orig, zi); // tz = tx original
 
             vx = new_tx;
             vy = new_ty;
