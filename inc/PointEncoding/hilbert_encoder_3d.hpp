@@ -91,7 +91,7 @@ public:
 
             __m256i octant = _mm256_or_si256(_mm256_or_si256(_mm256_slli_epi32(xi, 2), _mm256_slli_epi32(yi, 1)), zi);
 
-            __m256i hilbertVals = _mm256_permutevar8x32_epi32(lut, octant);
+            __m256i hilbertVals = _mm256_permutevar8x32_epi32(lookup_table_mortonToHilbert, octant);
 
             // Expandir Morton→Hilbert (8x uint32_t) a 8x uint64_t
             __m128i mth_lo = _mm256_extracti128_si256(hilbertVals, 0);
