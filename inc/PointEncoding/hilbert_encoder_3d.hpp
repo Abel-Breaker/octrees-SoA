@@ -19,7 +19,7 @@ public:
     static constexpr uint32_t UNUSED_BITS = 1;
 
     /// @brief A constant array to map adequately rotated x, y, z coordinates to their corresponding octant 
-    static constexpr uint32_t mortonToHilbert[8] = {0, 1, 3, 2, 7, 6, 4, 5};
+    static constexpr coords_t mortonToHilbert[8] = {0, 1, 3, 2, 7, 6, 4, 5};
 
     /**
      * @brief Encodes the given integer coordinates in the range [0,2^MAX_DEPTH]x[0,2^MAX_DEPTH]x[0,2^MAX_DEPTH] into their Hilbert key
@@ -76,6 +76,8 @@ public:
 
         __m256i one = _mm256_set1_epi32(1);
 
+        __m256i lookup_table_mortonToHilbert = _mm256_loadu_si256((const __m256i*)mortonToHilbert);
+
         alignas(32) uint32_t zi_arr[8], yi_arr[8]; // For rotations
 
         for (int level = MAX_DEPTH - 1; level >= 0; level--)
@@ -89,7 +91,7 @@ public:
 
             __m256i octant = _mm256_or_si256(_mm256_or_si256(_mm256_slli_epi32(xi, 2), _mm256_slli_epi32(yi, 1)), zi);
 
-            __m256i hilbertVals = _mm256_i32gather_epi32(mortonToHilbert, octant, 4);
+            __m256i hilbertVals = _mm256_permutevar8x32_epi32(lut, octant);
 
             // Expandir Morton→Hilbert (8x uint32_t) a 8x uint64_t
             __m128i mth_lo = _mm256_extracti128_si256(hilbertVals, 0);
