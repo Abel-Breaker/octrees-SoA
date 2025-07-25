@@ -89,17 +89,7 @@ public:
 
             __m256i octant = _mm256_or_si256(_mm256_or_si256(_mm256_slli_epi32(xi, 2), _mm256_slli_epi32(yi, 1)), zi);
 
-            // Lookup mortonToHilbert[octant]
-            alignas(32) uint32_t octants[8];
-            _mm256_store_si256((__m256i *)octants, octant);
-
-            alignas(32) uint32_t mthVals[8];
-            for (int j = 0; j < 8; ++j)
-            {
-                mthVals[j] = mortonToHilbert[octants[j]];
-            }
- 
-            __m256i hilbertVals = _mm256_load_si256((__m256i *)mthVals);
+            __m256i hilbertVals = _mm256_i32gather_epi32(mortonToHilbert, octant, 4);
 
             // Expandir Morton→Hilbert (8x uint32_t) a 8x uint64_t
             __m128i mth_lo = _mm256_extracti128_si256(hilbertVals, 0);
