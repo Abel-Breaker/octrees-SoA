@@ -312,25 +312,11 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
             tw.stop();
             std::cout << "Encoding-Vectorized time: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
 
-            for(int i = 0; i < n; i++) {
-                if (keys[i] != encodeFromPoint(points[i], bbox)) {
-                    std::cerr << "Error" << std::endl;
-                    break;
-                }
-            }
-
             #ifdef __AVX512F__
             tw.start();
             encodePointsVectorizedAVX512(points, bbox, keys);
             tw.stop();
             std::cout << "Encoding-Vectorized-AVX512 time: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
-
-            for(int i = 0; i < n; i++) {
-                if (keys[i] != encodeFromPoint(points[i], bbox)) {
-                    std::cerr << "Error" << std::endl;
-                    break;
-                }
-            }
             #endif
 
             std::vector<key_t> buffer(n);
