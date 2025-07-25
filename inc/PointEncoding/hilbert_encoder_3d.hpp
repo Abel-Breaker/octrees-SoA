@@ -155,15 +155,14 @@ public:
                         vz = _mm256_load_si256((__m256i *)tz);*/
 
             // Máscaras booleanas
-            __m256i mask_z = zi; // zi ≠ 0 → hacer rotación
-            __m256i not_mask_z = _mm256_cmpeq_epi32(mask_z, _mm256_setzero_si256());
+            __m256i not_mask_z = _mm256_cmpeq_epi32(zi, _mm256_setzero_si256());
             __m256i not_y = _mm256_cmpeq_epi32(yi, _mm256_setzero_si256());
             __m256i mask_swap = _mm256_and_si256(not_mask_z, not_y); // zi == 0 && yi == 0
 
             // Rotación cuando zi ≠ 0: tx = ty, ty = tz, tz = tx
-            __m256i new_tx = _mm256_blendv_epi8(vx, vy, mask_z);
-            __m256i new_ty = _mm256_blendv_epi8(vy, vz, mask_z);
-            __m256i new_tz = _mm256_blendv_epi8(vz, vx, mask_z);
+            __m256i new_tx = _mm256_blendv_epi8(vx, vy, zi);
+            __m256i new_ty = _mm256_blendv_epi8(vy, vz, zi);
+            __m256i new_tz = _mm256_blendv_epi8(vz, vx, zi);
 
             // Swap tx ↔ tz si zi == 0 && yi == 0
             vx = _mm256_blendv_epi8(new_tx, new_tz, mask_swap); // nuevo vx (tx)
