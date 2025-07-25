@@ -186,7 +186,6 @@ public:
     __m512i key_lo = _mm512_setzero_si512();
     __m512i key_hi = _mm512_setzero_si512();
 
-    alignas(64) uint32_t tx[16], ty[16], tz[16];
     alignas(64) uint32_t octants[16];
     alignas(64) uint32_t mthVals[16];
 
@@ -242,41 +241,29 @@ public:
         // Z
         __m512i cond_z = _mm512_or_epi32(
             _mm512_and_epi32(xi, _mm512_and_epi32(not_yi, not_zi)),
-            _mm512_and_epi32(yi, not_zi)
-        );
+            _mm512_and_epi32(yi, not_zi));
         vz = _mm512_xor_epi32(vz, _mm512_maskz_set1_epi32(_mm512_cmpeq_epi32_mask(cond_z, one), -1));
 
-        // Store for scalar rotation
-        _mm512_store_si512((__m512i *)tx, vx);
-        _mm512_store_si512((__m512i *)ty, vy);
-        _mm512_store_si512((__m512i *)tz, vz);
-        _mm512_store_si512((__m512i *)octants, zi); // reusing octants buffer for zi
-        _mm512_store_si512((__m512i *)mthVals, yi); // reusing mthVals buffer for yi
+        // Creamos máscaras (cada bit representa una condición para un elemento)
+        __mmask16 mask_octants = _mm512_test_epi32_mask(zi, _mm512_set1_epi32(-1));
+        __mmask16 mask_mthVals_false = _mm512_testn_epi32_mask(yi, _mm512_set1_epi32(-1));
+        __mmask16 mask_else = ~mask_octants & mask_mthVals_false;
 
-        for (int j = 0; j < 16; ++j)
-        {
-            if (octants[j])
-            {
-                uint32_t tmp = tx[j];
-                tx[j] = ty[j];
-                ty[j] = tz[j];
-                tz[j] = tmp;
-            }
-            else if (!mthVals[j])
-            {
-                std::swap(tx[j], tz[j]);
-            }
-        }
+        // Rotación para `octants == true`: tx = ty, ty = tz, tz = tx_original
+        __m512i vx_orig = vx;
+        vx = _mm512_mask_mov_epi32(vx, mask_octants, vy);
+        vy = _mm512_mask_mov_epi32(vy, mask_octants, vz);
+        vz = _mm512_mask_mov_epi32(vz, mask_octants, vx_orig);
 
-        // Reload rotated vectors
-        vx = _mm512_load_si512((__m512i *)tx);
-        vy = _mm512_load_si512((__m512i *)ty);
-        vz = _mm512_load_si512((__m512i *)tz);
+        // Swap tx <-> tz para el caso else
+        __m512i tmp_vx = vx;
+        vx = _mm512_mask_mov_epi32(vx, mask_else, vz);
+        vz = _mm512_mask_mov_epi32(vz, mask_else, tmp_vx);
     }
 
     // Store final key (two 256-bit stores for 8x uint64_t keys)
     _mm512_storeu_si512((__m512i *)&keys[i], key_lo);
-    _mm512_storeu_si512((__m512i *)&keys[i+8], key_hi);
+    _mm512_storeu_si512((__m512i *)&keys[i + 8], key_hi);
 }
 /*void encodeVectorizedAVX512(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const override
 {
@@ -388,41 +375,46 @@ public:
     _mm512_storeu_si512((__m512i *)&keys[i+8], key_hi);
 }*/
 
-    /// @brief Decodes the given key and puts the coordinates into x, y, z
-    void decode(key_t code, coords_t &x, coords_t &y, coords_t &z) const override {
-        // Initialize the coords values
-        x = 0, y = 0, z = 0;
-        for(int level = 0; level < MAX_DEPTH; level++) {
-            // Extract the octant from the key and put the bits into xi, yi and zi
-            const coords_t octant   = (code >> (3 * level)) & 7u;
-            const coords_t xi = octant >> 2u;
-            const coords_t yi = (octant >> 1u) & 1u;
-            const coords_t zi = octant & 1u;
+/// @brief Decodes the given key and puts the coordinates into x, y, z
+void decode(key_t code, coords_t &x, coords_t &y, coords_t &z) const override
+{
+    // Initialize the coords values
+    x = 0, y = 0, z = 0;
+    for (int level = 0; level < MAX_DEPTH; level++)
+    {
+        // Extract the octant from the key and put the bits into xi, yi and zi
+        const coords_t octant = (code >> (3 * level)) & 7u;
+        const coords_t xi = octant >> 2u;
+        const coords_t yi = (octant >> 1u) & 1u;
+        const coords_t zi = octant & 1u;
 
-            if(yi ^ zi) {
-                // Cylic clockwise rotation x, y, z -> z, x, y
-                coords_t temp = x;
-                x = z, z = y, y = temp;
-            } else if((!xi & !yi & !zi) || (xi & yi & zi)) {
-                // Swap x and z
-                coords_t temp = x;
-                x = z, z = temp;
-            }
-
-            // Turn x, y, z (Karnaugh mapped operations, check citation and Lam and Shapiro paper detailing 2D case 
-            // for understanding how this works)
-            const coords_t mask = (1u << level) - 1u;
-            x ^= mask & (-(xi & (yi | zi)));
-            y ^= mask & (-((xi & ((!yi) | (!zi))) | ((!xi) & yi & zi)));
-            z ^= mask & (-((xi & (!yi) & (!zi)) | (yi & zi)));
-
-            // Append the new bit to the position
-            x |= (xi << level);
-            y |= ((xi ^ yi) << level);
-            z |= ((yi ^ zi) << level);
+        if (yi ^ zi)
+        {
+            // Cylic clockwise rotation x, y, z -> z, x, y
+            coords_t temp = x;
+            x = z, z = y, y = temp;
         }
-        return;
+        else if ((!xi & !yi & !zi) || (xi & yi & zi))
+        {
+            // Swap x and z
+            coords_t temp = x;
+            x = z, z = temp;
+        }
+
+        // Turn x, y, z (Karnaugh mapped operations, check citation and Lam and Shapiro paper detailing 2D case
+        // for understanding how this works)
+        const coords_t mask = (1u << level) - 1u;
+        x ^= mask & (-(xi & (yi | zi)));
+        y ^= mask & (-((xi & ((!yi) | (!zi))) | ((!xi) & yi & zi)));
+        z ^= mask & (-((xi & (!yi) & (!zi)) | (yi & zi)));
+
+        // Append the new bit to the position
+        x |= (xi << level);
+        y |= ((xi ^ yi) << level);
+        z |= ((yi ^ zi) << level);
     }
+    return;
+}
 
     key_t encodeFromPoint(const Point& p, const Box &bbox) const override {
         coords_t x, y, z;
