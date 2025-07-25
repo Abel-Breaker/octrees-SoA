@@ -158,8 +158,6 @@ public:
             // Crear máscaras de 0xFFFFFFFF o 0x00000000 por elemento para usar en blendv
             __m256i zero = _mm256_setzero_si256();
             __m256i full = _mm256_set1_epi32(-1);                        // 0xFFFFFFFF
-            __m256i not_zi = _mm256_xor_si256(zi, _mm256_set1_epi32(1)); // !zi
-            __m256i not_yi = _mm256_xor_si256(yi, _mm256_set1_epi32(1)); // !yi
 
             // rot_mask = zi ? 0xFFFFFFFF : 0x00000000
             __m256i rot_mask = _mm256_cmpeq_epi32(zi, _mm256_set1_epi32(1));
