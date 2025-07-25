@@ -171,9 +171,9 @@ public:
 
     void encodeVectorizedAVX512(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const override
 {
-    __m512i vx = _mm512_loadu_si512((__m512i *)x);
-    __m512i vy = _mm512_loadu_si512((__m512i *)y);
-    __m512i vz = _mm512_loadu_si512((__m512i *)z);
+    __m512i vx = _mm512_load_si512((__m512i *)x);
+    __m512i vy = _mm512_load_si512((__m512i *)y);
+    __m512i vz = _mm512_load_si512((__m512i *)z);
 
     __m512i one = _mm512_set1_epi32(1);
 

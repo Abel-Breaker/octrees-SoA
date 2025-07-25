@@ -226,9 +226,9 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
                 __m256i z_uint = _mm512_cvttpd_epu32(z_scaled);
 
                 // Almacenar los resultados convertidos
-                _mm256_storeu_si256((__m256i *)x, x_uint);
-                _mm256_storeu_si256((__m256i *)y, y_uint);
-                _mm256_storeu_si256((__m256i *)z, z_uint);
+                _mm256_store_si256((__m256i *)x, x_uint);
+                _mm256_store_si256((__m256i *)y, y_uint);
+                _mm256_store_si256((__m256i *)z, z_uint);
 
 
                 // Second Iteration
@@ -262,9 +262,9 @@ void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std:
                 z_uint = _mm512_cvttpd_epu32(z_scaled);
 
                 // Extraer e imprimir los resultados
-                _mm256_storeu_si256((__m256i *)&x[8], x_uint);
-                _mm256_storeu_si256((__m256i *)&y[8], y_uint);
-                _mm256_storeu_si256((__m256i *)&z[8], z_uint);
+                _mm256_store_si256((__m256i *)&x[8], x_uint);
+                _mm256_store_si256((__m256i *)&y[8], y_uint);
+                _mm256_store_si256((__m256i *)&z[8], z_uint);
 
                 encodeVectorizedAVX512(x, y, z, keys, i);
             }
