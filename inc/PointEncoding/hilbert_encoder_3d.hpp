@@ -19,7 +19,7 @@ public:
     static constexpr uint32_t UNUSED_BITS = 1;
 
     /// @brief A constant array to map adequately rotated x, y, z coordinates to their corresponding octant 
-    static constexpr coords_t mortonToHilbert[8] = {0, 1, 3, 2, 7, 6, 4, 5};
+    static constexpr uint32_t mortonToHilbert[8] = {0, 1, 3, 2, 7, 6, 4, 5};
 
     /**
      * @brief Encodes the given integer coordinates in the range [0,2^MAX_DEPTH]x[0,2^MAX_DEPTH]x[0,2^MAX_DEPTH] into their Hilbert key
