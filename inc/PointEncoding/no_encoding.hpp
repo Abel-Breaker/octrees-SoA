@@ -19,10 +19,12 @@ class NoEncoding : public PointEncoder {
         return; // No encoding, do nothing
     }
 
+    #ifdef __AVX512F__
     void encodeVectorizedAVX512(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const override
     {
         return; // No encoding, do nothing
     }
+    #endif // __AVX512F__
 
     /// @brief Decodes the given Morton key and puts the coordinates into x, y, z
     inline void decode(key_t code, coords_t &x, coords_t &y, coords_t &z) const override {

@@ -25,7 +25,9 @@ public:
 
     virtual key_t encode(coords_t x, coords_t y, coords_t z) const = 0;
     virtual void encodeVectorized(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const = 0;
+    #ifdef __AVX512F__
     virtual void encodeVectorizedAVX512(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const =0;
+    #endif // __AVX512F__
     virtual void decode(key_t code, coords_t &x, coords_t &y, coords_t &z) const = 0;
 
     virtual uint32_t maxDepth() const = 0;
@@ -166,117 +168,117 @@ public:
             }
         }
 
+    #ifdef __AVX512F__
         template <PointContainer Container>
-void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std::vector<key_t> &keys) const {
-    size_t n = points.size();
-
-    if constexpr (std::is_same_v<Container, PointsSoA>) {
-        const auto *soa = dynamic_cast<const PointsSoA *>(&points);
-        if (!soa) {
-            std::cerr << "  [Error] Could not cast to PointsSoA\n";
-            return;
-        }
-
-        // Vectores AVX-512 con valores del bbox replicados
-        __m512d bboxCenterX = _mm512_set1_pd(bbox.center().getX());
-        __m512d bboxCenterY = _mm512_set1_pd(bbox.center().getY());
-        __m512d bboxCenterZ = _mm512_set1_pd(bbox.center().getZ());
-        __m512d bboxRadiiX  = _mm512_set1_pd(bbox.radii().getX());
-        __m512d bboxRadiiY  = _mm512_set1_pd(bbox.radii().getY());
-        __m512d bboxRadiiZ  = _mm512_set1_pd(bbox.radii().getZ());
-
-        __m512d two = _mm512_set1_pd(2.0);
-        __m512d scale = _mm512_set1_pd(1 << maxDepth());
-        __m512d maxCoord = _mm512_set1_pd((1u << maxDepth()) - 1u);
-
-        #pragma omp parallel
+        void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std::vector<key_t> &keys) const
         {
-            #pragma omp for schedule(static)
-            for (size_t i = 0; i < n - 15; i += 16) {
-                alignas(64) double x_vals[8], y_vals[8], z_vals[8];
-                alignas(64) uint32_t x[16], y[16], z[16];
+            size_t n = points.size();
 
-                // Cargar 8 valores de cada coordenada
-                __m512d pointsX = _mm512_loadu_pd(soa->dataX() + i);
-                __m512d pointsY = _mm512_loadu_pd(soa->dataY() + i);
-                __m512d pointsZ = _mm512_loadu_pd(soa->dataZ() + i);
+            if constexpr (std::is_same_v<Container, PointsSoA>)
+            {
+                const auto *soa = dynamic_cast<const PointsSoA *>(&points);
+                if (!soa)
+                {
+                    std::cerr << "  [Error] Could not cast to PointsSoA\n";
+                    return;
+                }
 
-                // ((p - center) + radii) / (2 * radii)
-                __m512d x_transf = _mm512_div_pd(
-                    _mm512_add_pd(_mm512_sub_pd(pointsX, bboxCenterX), bboxRadiiX),
-                    _mm512_mul_pd(two, bboxRadiiX)
-                );
-                __m512d y_transf = _mm512_div_pd(
-                    _mm512_add_pd(_mm512_sub_pd(pointsY, bboxCenterY), bboxRadiiY),
-                    _mm512_mul_pd(two, bboxRadiiY)
-                );
-                __m512d z_transf = _mm512_div_pd(
-                    _mm512_add_pd(_mm512_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ),
-                    _mm512_mul_pd(two, bboxRadiiZ)
-                );
+                // Vectores AVX-512 con valores del bbox replicados
+                __m512d bboxCenterX = _mm512_set1_pd(bbox.center().getX());
+                __m512d bboxCenterY = _mm512_set1_pd(bbox.center().getY());
+                __m512d bboxCenterZ = _mm512_set1_pd(bbox.center().getZ());
+                __m512d bboxRadiiX = _mm512_set1_pd(bbox.radii().getX());
+                __m512d bboxRadiiY = _mm512_set1_pd(bbox.radii().getY());
+                __m512d bboxRadiiZ = _mm512_set1_pd(bbox.radii().getZ());
 
-                // Escalado a [0, 2^L)
-                __m512d x_scaled = _mm512_min_pd(_mm512_mul_pd(x_transf, scale), maxCoord);
-                __m512d y_scaled = _mm512_min_pd(_mm512_mul_pd(y_transf, scale), maxCoord);
-                __m512d z_scaled = _mm512_min_pd(_mm512_mul_pd(z_transf, scale), maxCoord);
+                __m512d two = _mm512_set1_pd(2.0);
+                __m512d scale = _mm512_set1_pd(1 << maxDepth());
+                __m512d maxCoord = _mm512_set1_pd((1u << maxDepth()) - 1u);
 
-                // Convertir double a uint32_t (truncando)
-                __m256i x_uint = _mm512_cvttpd_epu32(x_scaled);
-                __m256i y_uint = _mm512_cvttpd_epu32(y_scaled);
-                __m256i z_uint = _mm512_cvttpd_epu32(z_scaled);
+                #pragma omp parallel
+                {
+                    #pragma omp for schedule(static)
+                    for (size_t i = 0; i < n - 15; i += 16)
+                    {
+                        alignas(64) double x_vals[8], y_vals[8], z_vals[8];
+                        alignas(64) uint32_t x[16], y[16], z[16];
 
-                // Almacenar los resultados convertidos
-                _mm256_store_si256((__m256i *)x, x_uint);
-                _mm256_store_si256((__m256i *)y, y_uint);
-                _mm256_store_si256((__m256i *)z, z_uint);
+                        // Cargar 8 valores de cada coordenada
+                        __m512d pointsX = _mm512_loadu_pd(soa->dataX() + i);
+                        __m512d pointsY = _mm512_loadu_pd(soa->dataY() + i);
+                        __m512d pointsZ = _mm512_loadu_pd(soa->dataZ() + i);
 
+                        // ((p - center) + radii) / (2 * radii)
+                        __m512d x_transf = _mm512_div_pd(
+                            _mm512_add_pd(_mm512_sub_pd(pointsX, bboxCenterX), bboxRadiiX),
+                            _mm512_mul_pd(two, bboxRadiiX));
+                        __m512d y_transf = _mm512_div_pd(
+                            _mm512_add_pd(_mm512_sub_pd(pointsY, bboxCenterY), bboxRadiiY),
+                            _mm512_mul_pd(two, bboxRadiiY));
+                        __m512d z_transf = _mm512_div_pd(
+                            _mm512_add_pd(_mm512_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ),
+                            _mm512_mul_pd(two, bboxRadiiZ));
 
-                // Second Iteration
-                // Cargar 8 valores de cada coordenada
-                pointsX = _mm512_loadu_pd(soa->dataX() + i + 8);
-                pointsY = _mm512_loadu_pd(soa->dataY() + i + 8);
-                pointsZ = _mm512_loadu_pd(soa->dataZ() + i + 8);
+                        // Escalado a [0, 2^L)
+                        __m512d x_scaled = _mm512_min_pd(_mm512_mul_pd(x_transf, scale), maxCoord);
+                        __m512d y_scaled = _mm512_min_pd(_mm512_mul_pd(y_transf, scale), maxCoord);
+                        __m512d z_scaled = _mm512_min_pd(_mm512_mul_pd(z_transf, scale), maxCoord);
 
-                // ((p - center) + radii) / (2 * radii)
-                x_transf = _mm512_div_pd(
-                    _mm512_add_pd(_mm512_sub_pd(pointsX, bboxCenterX), bboxRadiiX),
-                    _mm512_mul_pd(two, bboxRadiiX)
-                );
-                y_transf = _mm512_div_pd(
-                    _mm512_add_pd(_mm512_sub_pd(pointsY, bboxCenterY), bboxRadiiY),
-                    _mm512_mul_pd(two, bboxRadiiY)
-                );
-                z_transf = _mm512_div_pd(
-                    _mm512_add_pd(_mm512_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ),
-                    _mm512_mul_pd(two, bboxRadiiZ)
-                );
+                        // Convertir double a uint32_t (truncando)
+                        __m256i x_uint = _mm512_cvttpd_epu32(x_scaled);
+                        __m256i y_uint = _mm512_cvttpd_epu32(y_scaled);
+                        __m256i z_uint = _mm512_cvttpd_epu32(z_scaled);
 
-                // Escalado a [0, 2^L)
-                x_scaled = _mm512_min_pd(_mm512_mul_pd(x_transf, scale), maxCoord);
-                y_scaled = _mm512_min_pd(_mm512_mul_pd(y_transf, scale), maxCoord);
-                z_scaled = _mm512_min_pd(_mm512_mul_pd(z_transf, scale), maxCoord);
+                        // Almacenar los resultados convertidos
+                        _mm256_store_si256((__m256i *)x, x_uint);
+                        _mm256_store_si256((__m256i *)y, y_uint);
+                        _mm256_store_si256((__m256i *)z, z_uint);
 
-                // Conversión a uint32_t con truncamiento
-                x_uint = _mm512_cvttpd_epu32(x_scaled);
-                y_uint = _mm512_cvttpd_epu32(y_scaled);
-                z_uint = _mm512_cvttpd_epu32(z_scaled);
+                        // Second Iteration
+                        // Cargar 8 valores de cada coordenada
+                        pointsX = _mm512_loadu_pd(soa->dataX() + i + 8);
+                        pointsY = _mm512_loadu_pd(soa->dataY() + i + 8);
+                        pointsZ = _mm512_loadu_pd(soa->dataZ() + i + 8);
 
-                // Extraer e imprimir los resultados
-                _mm256_store_si256((__m256i *)&x[8], x_uint);
-                _mm256_store_si256((__m256i *)&y[8], y_uint);
-                _mm256_store_si256((__m256i *)&z[8], z_uint);
+                        // ((p - center) + radii) / (2 * radii)
+                        x_transf = _mm512_div_pd(
+                            _mm512_add_pd(_mm512_sub_pd(pointsX, bboxCenterX), bboxRadiiX),
+                            _mm512_mul_pd(two, bboxRadiiX));
+                        y_transf = _mm512_div_pd(
+                            _mm512_add_pd(_mm512_sub_pd(pointsY, bboxCenterY), bboxRadiiY),
+                            _mm512_mul_pd(two, bboxRadiiY));
+                        z_transf = _mm512_div_pd(
+                            _mm512_add_pd(_mm512_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ),
+                            _mm512_mul_pd(two, bboxRadiiZ));
 
-                encodeVectorizedAVX512(x, y, z, keys, i);
-            }
+                        // Escalado a [0, 2^L)
+                        x_scaled = _mm512_min_pd(_mm512_mul_pd(x_transf, scale), maxCoord);
+                        y_scaled = _mm512_min_pd(_mm512_mul_pd(y_transf, scale), maxCoord);
+                        z_scaled = _mm512_min_pd(_mm512_mul_pd(z_transf, scale), maxCoord);
 
-            // Procesar restantes (menos de 8)
-            #pragma omp single nowait
-            for (size_t i = n - (n % 16); i < n; ++i) {
-                keys[i] = encodeFromPoint(points[i], bbox);
+                        // Conversión a uint32_t con truncamiento
+                        x_uint = _mm512_cvttpd_epu32(x_scaled);
+                        y_uint = _mm512_cvttpd_epu32(y_scaled);
+                        z_uint = _mm512_cvttpd_epu32(z_scaled);
+
+                        // Extraer e imprimir los resultados
+                        _mm256_store_si256((__m256i *)&x[8], x_uint);
+                        _mm256_store_si256((__m256i *)&y[8], y_uint);
+                        _mm256_store_si256((__m256i *)&z[8], z_uint);
+
+                        encodeVectorizedAVX512(x, y, z, keys, i);
+                    }
+
+                    // Procesar restantes (menos de 8)
+                    #pragma omp single nowait
+                    for (size_t i = n - (n % 16); i < n; ++i)
+                    {
+                        keys[i] = encodeFromPoint(points[i], bbox);
+                    }
+                }
             }
         }
-    }
-}
+    #endif // __AVX512F__
 
         /**
          * @brief Parallel radix sort implementation for the SFC reordering.
