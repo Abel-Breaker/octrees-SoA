@@ -404,7 +404,7 @@ public:
         std::optional<std::vector<PointMetadata>> &meta_opt, const Box &bbox, std::shared_ptr<EncodingLog> log = nullptr) const {
         size_t n = points.size();
         // Choose 4, 8 or 16. 16 is less passes but requires more memory for the histograms and it offers better performance in most cases.
-        constexpr int BITS_PER_PASS = 16;
+        constexpr int BITS_PER_PASS = 8;
         constexpr int NUM_BUCKETS = 1 << BITS_PER_PASS;
         constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
         constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
