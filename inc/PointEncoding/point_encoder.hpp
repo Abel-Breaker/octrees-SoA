@@ -77,8 +77,7 @@ public:
                 return;
             }
             
-
-            // Vectores AVX con valores replicados del bbox
+            // Constants
             __m256d bboxCenterX = _mm256_set1_pd(bbox.center().getX());
             __m256d bboxCenterY = _mm256_set1_pd(bbox.center().getY());
             __m256d bboxCenterZ = _mm256_set1_pd(bbox.center().getZ());
@@ -86,7 +85,7 @@ public:
             __m256d bboxRadiiY = _mm256_set1_pd(bbox.radii().getY());
             __m256d bboxRadiiZ = _mm256_set1_pd(bbox.radii().getZ());
 
-            // Constantes para el cálculo
+            
             __m256d two = _mm256_set1_pd(2.0);
             __m256d scale = _mm256_set1_pd(1 << maxDepth());
             __m256d maxCoord = _mm256_set1_pd((1u << maxDepth()) - 1u);
@@ -99,23 +98,22 @@ public:
                     {
                         alignas(32) uint32_t x[8], y[8], z[8];
 
-                        __m256d pointsX = _mm256_load_pd(soa->dataX() + i); // Carga 4 doubles alineados
-                        __m256d pointsY = _mm256_load_pd(soa->dataY() + i); // Carga 4 doubles alineados
-                        __m256d pointsZ = _mm256_load_pd(soa->dataZ() + i); // Carga 4 doubles alineados
+                        // Load 4 elements
+                        __m256d pointsX = _mm256_load_pd(soa->dataX() + i);
+                        __m256d pointsY = _mm256_load_pd(soa->dataY() + i);
+                        __m256d pointsZ = _mm256_load_pd(soa->dataZ() + i);
 
-                        // Transformación a cubo unitario: ((p - center) + radii) / (2 * radii)
+                        // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
                         __m256d x_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsX, bboxCenterX), bboxRadiiX), _mm256_mul_pd(two, bboxRadiiX));
                         __m256d y_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsY, bboxCenterY), bboxRadiiY), _mm256_mul_pd(two, bboxRadiiY));
                         __m256d z_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ), _mm256_mul_pd(two, bboxRadiiZ));
 
-                        // Escalado a [0, 2^L)
+                        // Scale to [0,2^L)^3 for morton encoding, handle edge case where coordinate could be 2^L if _transf is exactly 1.0
                         __m256d x_scaled = _mm256_min_pd(_mm256_mul_pd(x_transf, scale), maxCoord);
                         __m256d y_scaled = _mm256_min_pd(_mm256_mul_pd(y_transf, scale), maxCoord);
                         __m256d z_scaled = _mm256_min_pd(_mm256_mul_pd(z_transf, scale), maxCoord);
 
-                        // Conversión a enteros y codificación (esto requiere implementación específica)
-                        // Por ahora, procesamos elemento por elemento
-
+                        // Store
                         alignas(32) double x_vals[4], y_vals[4], z_vals[4];
                         _mm256_store_pd(x_vals, x_scaled);
                         _mm256_store_pd(y_vals, y_scaled);
@@ -129,21 +127,21 @@ public:
                         }
 
                         // Second iteration
-                        pointsX = _mm256_load_pd(soa->dataX() + i + 4); // Carga 4 doubles alineados
-                        pointsY = _mm256_load_pd(soa->dataY() + i + 4); // Carga 4 doubles alineados
-                        pointsZ = _mm256_load_pd(soa->dataZ() + i + 4); // Carga 4 doubles alineados
+                        pointsX = _mm256_load_pd(soa->dataX() + i + 4);
+                        pointsY = _mm256_load_pd(soa->dataY() + i + 4);
+                        pointsZ = _mm256_load_pd(soa->dataZ() + i + 4);
 
-                        // Transformación a cubo unitario: ((p - center) + radii) / (2 * radii)
+                        // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
                         x_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsX, bboxCenterX), bboxRadiiX), _mm256_mul_pd(two, bboxRadiiX));
                         y_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsY, bboxCenterY), bboxRadiiY), _mm256_mul_pd(two, bboxRadiiY));
                         z_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ), _mm256_mul_pd(two, bboxRadiiZ));
 
-                        // Escalado a [0, 2^L)
+                        // Scale to [0,2^L)^3 for morton encoding, handle edge case where coordinate could be 2^L if _transf is exactly 1.0
                         x_scaled = _mm256_min_pd(_mm256_mul_pd(x_transf, scale), maxCoord);
                         y_scaled = _mm256_min_pd(_mm256_mul_pd(y_transf, scale), maxCoord);
                         z_scaled = _mm256_min_pd(_mm256_mul_pd(z_transf, scale), maxCoord);
 
-                        // Conversión a enteros y codificación
+                        // Store
                         _mm256_store_pd(x_vals, x_scaled);
                         _mm256_store_pd(y_vals, y_scaled);
                         _mm256_store_pd(z_vals, z_scaled);
@@ -158,7 +156,7 @@ public:
                         encodeVectorized(x, y, z, keys, i);
                     }
 
-                    // Procesar elementos restantes
+                    // Process remaining items
                     #pragma omp single nowait
                     for (size_t i = n - (n % 4); i < n; ++i)
                     {
@@ -183,7 +181,7 @@ public:
                     return;
                 }
 
-                // Vectores AVX-512 con valores del bbox replicados
+                // Constants
                 __m512d bboxCenterX = _mm512_set1_pd(bbox.center().getX());
                 __m512d bboxCenterY = _mm512_set1_pd(bbox.center().getY());
                 __m512d bboxCenterZ = _mm512_set1_pd(bbox.center().getZ());
@@ -203,12 +201,12 @@ public:
                         alignas(64) double x_vals[8], y_vals[8], z_vals[8];
                         alignas(64) uint32_t x[16], y[16], z[16];
 
-                        // Cargar 8 valores de cada coordenada
+                        // Load 8 elements
                         __m512d pointsX = _mm512_loadu_pd(soa->dataX() + i);
                         __m512d pointsY = _mm512_loadu_pd(soa->dataY() + i);
                         __m512d pointsZ = _mm512_loadu_pd(soa->dataZ() + i);
 
-                        // ((p - center) + radii) / (2 * radii)
+                        // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
                         __m512d x_transf = _mm512_div_pd(
                             _mm512_add_pd(_mm512_sub_pd(pointsX, bboxCenterX), bboxRadiiX),
                             _mm512_mul_pd(two, bboxRadiiX));
@@ -219,28 +217,27 @@ public:
                             _mm512_add_pd(_mm512_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ),
                             _mm512_mul_pd(two, bboxRadiiZ));
 
-                        // Escalado a [0, 2^L)
+                        // Scale to [0,2^L)^3 for morton encoding, handle edge case where coordinate could be 2^L if _transf is exactly 1.0
                         __m512d x_scaled = _mm512_min_pd(_mm512_mul_pd(x_transf, scale), maxCoord);
                         __m512d y_scaled = _mm512_min_pd(_mm512_mul_pd(y_transf, scale), maxCoord);
                         __m512d z_scaled = _mm512_min_pd(_mm512_mul_pd(z_transf, scale), maxCoord);
 
-                        // Convertir double a uint32_t (truncando)
+                        // Cast double to uint32_t
                         __m256i x_uint = _mm512_cvttpd_epu32(x_scaled);
                         __m256i y_uint = _mm512_cvttpd_epu32(y_scaled);
                         __m256i z_uint = _mm512_cvttpd_epu32(z_scaled);
 
-                        // Almacenar los resultados convertidos
+                        // Store
                         _mm256_store_si256((__m256i *)x, x_uint);
                         _mm256_store_si256((__m256i *)y, y_uint);
                         _mm256_store_si256((__m256i *)z, z_uint);
 
                         // Second Iteration
-                        // Cargar 8 valores de cada coordenada
                         pointsX = _mm512_loadu_pd(soa->dataX() + i + 8);
                         pointsY = _mm512_loadu_pd(soa->dataY() + i + 8);
                         pointsZ = _mm512_loadu_pd(soa->dataZ() + i + 8);
 
-                        // ((p - center) + radii) / (2 * radii)
+                        // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
                         x_transf = _mm512_div_pd(
                             _mm512_add_pd(_mm512_sub_pd(pointsX, bboxCenterX), bboxRadiiX),
                             _mm512_mul_pd(two, bboxRadiiX));
@@ -251,17 +248,17 @@ public:
                             _mm512_add_pd(_mm512_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ),
                             _mm512_mul_pd(two, bboxRadiiZ));
 
-                        // Escalado a [0, 2^L)
+                        // Scale to [0,2^L)^3 for morton encoding, handle edge case where coordinate could be 2^L if _transf is exactly 1.0
                         x_scaled = _mm512_min_pd(_mm512_mul_pd(x_transf, scale), maxCoord);
                         y_scaled = _mm512_min_pd(_mm512_mul_pd(y_transf, scale), maxCoord);
                         z_scaled = _mm512_min_pd(_mm512_mul_pd(z_transf, scale), maxCoord);
 
-                        // Conversión a uint32_t con truncamiento
+                        // Cast double to uint32_t
                         x_uint = _mm512_cvttpd_epu32(x_scaled);
                         y_uint = _mm512_cvttpd_epu32(y_scaled);
                         z_uint = _mm512_cvttpd_epu32(z_scaled);
 
-                        // Extraer e imprimir los resultados
+                        // Store
                         _mm256_store_si256((__m256i *)&x[8], x_uint);
                         _mm256_store_si256((__m256i *)&y[8], y_uint);
                         _mm256_store_si256((__m256i *)&z[8], z_uint);
@@ -269,7 +266,7 @@ public:
                         encodeVectorizedAVX512(x, y, z, keys, i);
                     }
 
-                    // Procesar restantes (menos de 8)
+                    // Process remaining items
                     #pragma omp single nowait
                     for (size_t i = n - (n % 16); i < n; ++i)
                     {
