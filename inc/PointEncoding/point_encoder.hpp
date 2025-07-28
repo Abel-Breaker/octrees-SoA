@@ -619,18 +619,18 @@ public:
 #pragma omp for schedule(static)
                     for (size_t i = 0; i < n - 7; i += 8)
                     {
-                        __m512i bucket_indices = _mm512_load_epi64((__m512i *)&keys[i]);
+                        __m512i bucket_indices = _mm512_loadu_epi64((__m512i *)&keys[i]);
                         bucket_indices = _mm512_srli_epi64(bucket_indices, shift);
                         bucket_indices = _mm512_and_si512(bucket_indices, _mm512_set1_epi64(BUCKET_MASK));
 
                         // Gather: leer hist[bucket_indices[j]]
-                        __m512i gathered = _mm512_i64gather_epi64(bucket_indices, hist, sizeof(uint64_t));
+                        __m512i gathered = _mm512_i64gather_epi64(bucket_indices, hist.data(), sizeof(uint64_t));
 
                         // Sumar 1 a cada valor
                         __m512i updated = _mm512_add_epi64(gathered, one);
 
                         // Scatter: escribir hist[bucket_indices[j]] = updated[j]
-                        _mm512_i64scatter_epi64(hist, bucket_indices, updated, sizeof(uint64_t));
+                        _mm512_i64scatter_epi64(hist.data(), bucket_indices, updated, sizeof(uint64_t));
                     }
 
 #pragma omp single
