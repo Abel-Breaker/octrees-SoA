@@ -623,13 +623,13 @@ public:
                         bucket_indices = _mm512_srli_epi64(bucket_indices, shift);
                         bucket_indices = _mm512_and_si512(bucket_indices, _mm512_set1_epi64(BUCKET_MASK));
 
-                        alignas(64) uint64_t result[8];                    // 64 bytes = 512 bits
-                        _mm512_store_si512((__m512i *)result, result_and); // result_and: __m512i
+                        alignas(64) uint64_t indices[8];                    // 64 bytes = 512 bits
+                        _mm512_store_si512((__m512i *)indices, bucket_indices); // result_and: __m512i
 
                         // Bucle escalar para incrementar histograma
                         for (int j = 0; j < 8; ++j)
                         {
-                            hist[result[j]]++;
+                            hist[indices[j]]++;
                         }
                     }
 
