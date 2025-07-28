@@ -592,6 +592,7 @@ public:
         constexpr int NUM_BUCKETS = 1 << BITS_PER_PASS;
         constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
         constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
+        __m512i one = _mm512_set1_epi64(1);
 
         std::vector<key_t> keys(n);
 
