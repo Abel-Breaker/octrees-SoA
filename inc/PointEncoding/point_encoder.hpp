@@ -339,7 +339,7 @@ public:
                 #pragma omp parallel
                 {
                     auto &hist = localHist[omp_get_thread_num()];
-                    #pragma omp for nowait schedule(static)
+                    #pragma omp for schedule(static)
                     for (size_t i = 0; i < n; ++i)
                     {
                         size_t bucket = (keys[i] >> shift) & BUCKET_MASK;
@@ -431,7 +431,7 @@ public:
                 {
                     int tid = omp_get_thread_num();
                     auto &hist = localHist[tid];
-#pragma omp for nowait schedule(static)
+#pragma omp for schedule(static)
                     for (size_t i = 0; i < n; ++i)
                     {
                         size_t encoded_key = encodeFromPoint(points[i], bbox);
@@ -536,7 +536,7 @@ public:
                 #pragma omp parallel
                 {
                     auto &hist = localHist[omp_get_thread_num()];
-                    #pragma omp for nowait schedule(static)
+                    #pragma omp for schedule(static)
                     for (size_t i = 0; i < n; ++i)
                     {
                         size_t bucket = (keys[i] >> shift) & BUCKET_MASK;
@@ -582,6 +582,108 @@ public:
             return keys;
     }
 
+    #ifdef AVX512F
+    template <PointContainer Container>
+        std::vector<key_t> sortPoints_Optimized_AVX512(Container &points,
+                                      std::optional<std::vector<PointMetadata>> &meta_opt, const Box &bbox, std::shared_ptr<EncodingLog> log = nullptr) const
+        {
+            size_t n = points.size();
+            constexpr int BITS_PER_PASS = 8;
+            constexpr int NUM_BUCKETS = 1 << BITS_PER_PASS;
+            constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
+            constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
+
+            std::vector<key_t> keys(n);
+
+            // Encoding
+            encodePointsVectorized(points, bbox, keys);
+
+
+
+            std::vector<key_t> buffer(n);
+            std::vector<PointMetadata> metadata_buffer;
+
+            Container bufferDecoded(n);
+            if (meta_opt)
+                metadata_buffer.resize(n);
+
+            for (int pass = 0; pass < NUM_PASSES; pass++)
+            {
+                int shift = pass * BITS_PER_PASS;
+
+
+
+                const int nThreads = omp_get_max_threads();
+                std::vector<std::vector<size_t>> localHist(nThreads, std::vector<size_t>(NUM_BUCKETS, 0));
+
+                // Step 1: Histogram
+                #pragma omp parallel
+                {
+                    auto &hist = localHist[omp_get_thread_num()];
+#pragma omp for schedule(static)
+                    for (size_t i = 0; i < n - 7; i += 8)
+                    {
+                        __m512i bucket_indices = _mm512_load_epi64((__m512i *)&keys[i]);
+                        bucket_indices = _mm512_srli_epi64(vec, shift);
+                        bucket_indices = _mm512_and_si512(vec, _mm512_set1_epi64(BUCKET_MASK));
+
+                        // Gather: leer hist[bucket_indices[j]]
+                        __m512i gathered = _mm512_i64gather_epi64(bucket_indices, hist, sizeof(uint64_t));
+
+                        // Sumar 1 a cada valor
+                        __m512i updated = _mm512_add_epi64(gathered, one);
+
+                        // Scatter: escribir hist[bucket_indices[j]] = updated[j]
+                        _mm512_i64scatter_epi64(hist, bucket_indices, updated, sizeof(uint64_t));
+                    }
+
+#pragma omp single
+                    for (size_t i = n - (n % 16); i < n; ++i)
+                    {
+                        size_t bucket = (keys[i] >> shift) & BUCKET_MASK;
+                        hist[bucket]++;
+                    }
+                
+
+                // Step 2: Scan histograms to offsets
+                #pragma omp single
+                {
+                    size_t offset = 0;
+                    for (int b = 0; b < NUM_BUCKETS; b++)
+                    {
+                        for (int t = 0; t < nThreads; t++)
+                        {
+                            size_t val = localHist[t][b];
+                            localHist[t][b] = offset;
+                            offset += val;
+                        }
+                    }
+                }
+
+                // Step 3: Scatter to buffer using per-thread offsets
+                    auto &localOffset = localHist[omp_get_thread_num()];
+                    #pragma omp for schedule(static)
+                    for (size_t i = 0; i < n; i++)
+                    {
+                        size_t bucket = (keys[i] >> shift) & BUCKET_MASK;
+                        size_t pos = localOffset[bucket]++;
+                        buffer[pos] = keys[i];
+                        bufferDecoded[pos] = points[i];
+                        if (meta_opt)
+                            metadata_buffer[pos] = (*meta_opt)[i];
+                    }
+                }
+
+                std::swap(points, bufferDecoded);
+                std::swap(keys, buffer);
+                if (meta_opt)
+                    std::swap(*meta_opt, metadata_buffer);
+            }
+
+            return keys;
+    }
+    #endif
+
     /**
      * @brief This function computes the encodings of the points and sorts them in
      * the given order. The points array is altered in-place here!
@@ -612,22 +714,50 @@ public:
 
         // Hacer una copia local de points
         auto local_points = points;  // deducción explícita con copia
+        std::vector<key_t> keys;
 
 
         tw.start();
-        sortPoints_Basic<Container>(local_points, meta_opt, bbox);
+        keys = sortPoints_Basic<Container>(local_points, meta_opt, bbox);
         tw.stop();
         std::cout << "Sort time base: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
+        std::cout << "Sorted - Sort time optimized:" << std::boolalpha << isOrdered(keys) << std::endl;
+
         local_points = points;  // deducción explícita con copia
         tw.start();
-        sortPoints_Optimized<Container>(local_points, meta_opt, bbox, log);
+        keys = sortPoints_Optimized<Container>(local_points, meta_opt, bbox, log);
         tw.stop();
         std::cout << "Sort time optimized: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
+        std::cout << "Sorted - Sort time optimized:" << std::boolalpha << isOrdered(keys) << std::endl;
+
+        #ifdef __AVX512F__
+        local_points = points;  // deducción explícita con copia
+        tw.start();
+        keys = sortPoints_Optimized_AVX512<Container>(local_points, meta_opt, bbox, log);
+        tw.stop();
+        std::cout << "Sort time optimized with AVX512: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
+        std::cout << "Sorted - Sort time optimized AVX512:" << std::boolalpha << isOrdered(keys) << std::endl;
+        #endif
         
 
         return std::make_pair(sortPoints<Container>(points, meta_opt, bbox, log), bbox);
     }
 
+    bool isOrdered(const std::vector<key_t> &points) const
+        {
+
+            size_t n = points.size();
+
+            for (size_t i = 0; i < n - 1; ++i)
+            {
+                if (points[i] > points[i + 1])
+                {
+                    printf("Points not ordered at index %zu: %lu > %lu\n", i, points[i], points[i + 1]);
+                    return false;
+                }
+            }
+            return true;
+        }
 
     /**
      * @brief Get the center and radii of an octant at a given octree level.
