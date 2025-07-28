@@ -582,42 +582,38 @@ public:
             return keys;
     }
 
-    #ifdef AVX512F
+#ifdef __AVX512F__
     template <PointContainer Container>
-        std::vector<key_t> sortPoints_Optimized_AVX512(Container &points,
-                                      std::optional<std::vector<PointMetadata>> &meta_opt, const Box &bbox, std::shared_ptr<EncodingLog> log = nullptr) const
+    std::vector<key_t> sortPoints_Optimized_AVX512(Container &points,
+                                                   std::optional<std::vector<PointMetadata>> &meta_opt, const Box &bbox, std::shared_ptr<EncodingLog> log = nullptr) const
+    {
+        size_t n = points.size();
+        constexpr int BITS_PER_PASS = 8;
+        constexpr int NUM_BUCKETS = 1 << BITS_PER_PASS;
+        constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
+        constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
+
+        std::vector<key_t> keys(n);
+
+        // Encoding
+        encodePointsVectorized(points, bbox, keys);
+
+        std::vector<key_t> buffer(n);
+        std::vector<PointMetadata> metadata_buffer;
+
+        Container bufferDecoded(n);
+        if (meta_opt)
+            metadata_buffer.resize(n);
+
+        for (int pass = 0; pass < NUM_PASSES; pass++)
         {
-            size_t n = points.size();
-            constexpr int BITS_PER_PASS = 8;
-            constexpr int NUM_BUCKETS = 1 << BITS_PER_PASS;
-            constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
-            constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
+            int shift = pass * BITS_PER_PASS;
 
-            std::vector<key_t> keys(n);
+            const int nThreads = omp_get_max_threads();
+            std::vector<std::vector<size_t>> localHist(nThreads, std::vector<size_t>(NUM_BUCKETS, 0));
 
-            // Encoding
-            encodePointsVectorized(points, bbox, keys);
-
-
-
-            std::vector<key_t> buffer(n);
-            std::vector<PointMetadata> metadata_buffer;
-
-            Container bufferDecoded(n);
-            if (meta_opt)
-                metadata_buffer.resize(n);
-
-            for (int pass = 0; pass < NUM_PASSES; pass++)
-            {
-                int shift = pass * BITS_PER_PASS;
-
-
-
-                const int nThreads = omp_get_max_threads();
-                std::vector<std::vector<size_t>> localHist(nThreads, std::vector<size_t>(NUM_BUCKETS, 0));
-
-                // Step 1: Histogram
-                #pragma omp parallel
+// Step 1: Histogram
+#pragma omp parallel
                 {
                     auto &hist = localHist[omp_get_thread_num()];
 #pragma omp for schedule(static)
@@ -643,26 +639,25 @@ public:
                         size_t bucket = (keys[i] >> shift) & BUCKET_MASK;
                         hist[bucket]++;
                     }
-                
 
-                // Step 2: Scan histograms to offsets
-                #pragma omp single
-                {
-                    size_t offset = 0;
-                    for (int b = 0; b < NUM_BUCKETS; b++)
+// Step 2: Scan histograms to offsets
+#pragma omp single
                     {
-                        for (int t = 0; t < nThreads; t++)
+                        size_t offset = 0;
+                        for (int b = 0; b < NUM_BUCKETS; b++)
                         {
-                            size_t val = localHist[t][b];
-                            localHist[t][b] = offset;
-                            offset += val;
+                            for (int t = 0; t < nThreads; t++)
+                            {
+                                size_t val = localHist[t][b];
+                                localHist[t][b] = offset;
+                                offset += val;
+                            }
                         }
                     }
-                }
 
-                // Step 3: Scatter to buffer using per-thread offsets
+                    // Step 3: Scatter to buffer using per-thread offsets
                     auto &localOffset = localHist[omp_get_thread_num()];
-                    #pragma omp for schedule(static)
+#pragma omp for schedule(static)
                     for (size_t i = 0; i < n; i++)
                     {
                         size_t bucket = (keys[i] >> shift) & BUCKET_MASK;
@@ -681,69 +676,69 @@ public:
             }
 
             return keys;
-    }
-    #endif
-
-    /**
-     * @brief This function computes the encodings of the points and sorts them in
-     * the given order. The points array is altered in-place here!
-     * 
-     * @details This is the main reordering function that we use to achieve spatial locality during neighbourhood
-     * searches. Encodings are first computed using encodeFromPoint, put into a pairs vector and then reordered.
-     * 
-     * @param points The input/output array of 3D points (i.e. the point cloud)
-     * @param codes The output array of computed codes (allocated here, only pass unallocated reference)
-     * @param bbox The precomputed global bounding box of points
-     * @param meta_opt The optional metadata of the point cloud (if Lpoint is used, it is contained on the struct). 
-     * meta_opt is a parallel array to points and will be sorted in the same order
-     */
-    template <PointContainer Container>
-    std::pair<std::vector<key_t>, Box> sortPoints(Container &points, 
-        std::optional<std::vector<PointMetadata>> &meta_opt, std::shared_ptr<EncodingLog> log = nullptr) const {
-        // Find the bbox
-        TimeWatcher tw;
-        tw.start();
-        Vector radii;
-        Point center = mbb(points, radii);
-        Box bbox = Box(center, radii);
-        tw.stop();
-        if(log) {
-            log->boundingBoxTime = tw.getElapsedDecimalSeconds();
         }
-        // Call the regular sortPoints with metadata
+#endif
 
-        // Hacer una copia local de points
-        auto local_points = points;  // deducción explícita con copia
-        std::vector<key_t> keys;
+        /**
+         * @brief This function computes the encodings of the points and sorts them in
+         * the given order. The points array is altered in-place here!
+         *
+         * @details This is the main reordering function that we use to achieve spatial locality during neighbourhood
+         * searches. Encodings are first computed using encodeFromPoint, put into a pairs vector and then reordered.
+         *
+         * @param points The input/output array of 3D points (i.e. the point cloud)
+         * @param codes The output array of computed codes (allocated here, only pass unallocated reference)
+         * @param bbox The precomputed global bounding box of points
+         * @param meta_opt The optional metadata of the point cloud (if Lpoint is used, it is contained on the struct).
+         * meta_opt is a parallel array to points and will be sorted in the same order
+         */
+        template <PointContainer Container>
+        std::pair<std::vector<key_t>, Box> sortPoints(Container &points,
+                                                      std::optional<std::vector<PointMetadata>> &meta_opt, std::shared_ptr<EncodingLog> log = nullptr) const
+        {
+            // Find the bbox
+            TimeWatcher tw;
+            tw.start();
+            Vector radii;
+            Point center = mbb(points, radii);
+            Box bbox = Box(center, radii);
+            tw.stop();
+            if (log)
+            {
+                log->boundingBoxTime = tw.getElapsedDecimalSeconds();
+            }
+            // Call the regular sortPoints with metadata
 
+            // Hacer una copia local de points
+            auto local_points = points; // deducción explícita con copia
+            std::vector<key_t> keys;
 
-        tw.start();
-        keys = sortPoints_Basic<Container>(local_points, meta_opt, bbox);
-        tw.stop();
-        std::cout << "Sort time base: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
-        std::cout << "Sorted - Sort time optimized:" << std::boolalpha << isOrdered(keys) << std::endl;
+            tw.start();
+            keys = sortPoints_Basic<Container>(local_points, meta_opt, bbox);
+            tw.stop();
+            std::cout << "Sort time base: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
+            std::cout << "Sorted - Sort time Base:" << std::boolalpha << isOrdered(keys) << std::endl;
 
-        local_points = points;  // deducción explícita con copia
-        tw.start();
-        keys = sortPoints_Optimized<Container>(local_points, meta_opt, bbox, log);
-        tw.stop();
-        std::cout << "Sort time optimized: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
-        std::cout << "Sorted - Sort time optimized:" << std::boolalpha << isOrdered(keys) << std::endl;
+            local_points = points; // deducción explícita con copia
+            tw.start();
+            keys = sortPoints_Optimized<Container>(local_points, meta_opt, bbox, log);
+            tw.stop();
+            std::cout << "Sort time optimized: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
+            std::cout << "Sorted - Sort time optimized:" << std::boolalpha << isOrdered(keys) << std::endl;
 
-        #ifdef __AVX512F__
-        local_points = points;  // deducción explícita con copia
-        tw.start();
-        keys = sortPoints_Optimized_AVX512<Container>(local_points, meta_opt, bbox, log);
-        tw.stop();
-        std::cout << "Sort time optimized with AVX512: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
-        std::cout << "Sorted - Sort time optimized AVX512:" << std::boolalpha << isOrdered(keys) << std::endl;
-        #endif
-        
+#ifdef __AVX512F__
+            local_points = points; // deducción explícita con copia
+            tw.start();
+            keys = sortPoints_Optimized_AVX512<Container>(local_points, meta_opt, bbox, log);
+            tw.stop();
+            std::cout << "Sort time optimized with AVX512: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
+            std::cout << "Sorted - Sort time optimized AVX512:" << std::boolalpha << isOrdered(keys) << std::endl;
+#endif
 
-        return std::make_pair(sortPoints<Container>(points, meta_opt, bbox, log), bbox);
-    }
+            return std::make_pair(sortPoints<Container>(points, meta_opt, bbox, log), bbox);
+        }
 
-    bool isOrdered(const std::vector<key_t> &points) const
+        bool isOrdered(const std::vector<key_t> &points) const
         {
 
             size_t n = points.size();
