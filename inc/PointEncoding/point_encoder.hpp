@@ -635,7 +635,7 @@ public:
                     }
 
 #pragma omp single
-                    for (size_t i = n - (n % 16); i < n; ++i)
+                    for (size_t i = n - (n % 8); i < n; ++i)
                     {
                         size_t bucket = (keys[i] >> shift) & BUCKET_MASK;
                         hist[bucket]++;
