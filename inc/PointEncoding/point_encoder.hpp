@@ -400,7 +400,7 @@ public:
          *
          */
         template <PointContainer Container>
-        std::vector<key_t> basic(std::vector<Container> &points,
+        std::vector<key_t> sortPoints_Basic(Container &points,
                                  std::optional<std::vector<PointMetadata>> &meta_opt, const Box &bbox) const
         {
             size_t n = points.size();
@@ -623,14 +623,14 @@ public:
                         bucket_indices = _mm512_srli_epi64(bucket_indices, shift);
                         bucket_indices = _mm512_and_si512(bucket_indices, _mm512_set1_epi64(BUCKET_MASK));
 
-                        // Gather: leer hist[bucket_indices[j]]
-                        __m512i gathered = _mm512_i64gather_epi64(bucket_indices, hist.data(), sizeof(uint64_t));
+                        alignas(64) uint64_t result[8];                    // 64 bytes = 512 bits
+                        _mm512_store_si512((__m512i *)result, result_and); // result_and: __m512i
 
-                        // Sumar 1 a cada valor
-                        __m512i updated = _mm512_add_epi64(gathered, one);
-
-                        // Scatter: escribir hist[bucket_indices[j]] = updated[j]
-                        _mm512_i64scatter_epi64(hist.data(), bucket_indices, updated, sizeof(uint64_t));
+                        // Bucle escalar para incrementar histograma
+                        for (int j = 0; j < 8; ++j)
+                        {
+                            hist[result[j]]++;
+                        }
                     }
 
 #pragma omp single
@@ -743,7 +743,7 @@ public:
 
             size_t n = points.size();
 
-            for (size_t i = 0; i < n - 1; ++i)
+            for (size_t i = 1; i < n - 1; ++i)
             {
                 if (points[i] > points[i + 1])
                 {
