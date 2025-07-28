@@ -454,7 +454,8 @@ public:
                     size_t encoded_key = encodeFromPoint(points[i], bbox);
                     size_t bucket = (encoded_key >> shift) & BUCKET_MASK;
                     size_t pos = localOffset[bucket]++;
-                    buffer.set(pos, points[i]);
+                    buffer[pos] = points[i]; 
+                    //buffer.set(pos, points[i]);
                     if (meta_opt) metadata_buffer[pos] = (*meta_opt)[i];
                 }
             }
