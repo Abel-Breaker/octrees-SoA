@@ -601,7 +601,7 @@ public:
 #pragma omp parallel
                 {
                     auto &hist = localHist[omp_get_thread_num()];
-#pragma omp for schedule(dinamic)
+#pragma omp for schedule(dynamic)
                     for (size_t i = 0; i < n - 7; i += 8)
                     {
                         __m512i bucket_indices = _mm512_loadu_epi64((__m512i *)&keys[i]);
