@@ -400,96 +400,80 @@ public:
          *
          */
         template <PointContainer Container>
-        std::vector<key_t> sortPoints_Basic(Container &points,
-                                      std::optional<std::vector<PointMetadata>> &meta_opt, const Box &bbox, std::shared_ptr<EncodingLog> log = nullptr) const
-        {
-            size_t n = points.size();
-            // Choose 4, 8 or 16. 16 is less passes but requires more memory for the histograms and it offers better performance in most cases.
-            constexpr int BITS_PER_PASS = 16;
-            constexpr int NUM_BUCKETS = 1 << BITS_PER_PASS;
-            constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
-            constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
-
-            TimeWatcher tw;
-
-            Container buffer(n);
-            //auto buffer = points;
-            std::vector<PointMetadata> metadata_buffer;
-            if (meta_opt)
-                metadata_buffer.resize(n);
-
-            for (int pass = 0; pass < NUM_PASSES; pass++)
+    std::vector<key_t> sortPoints_Basic(Container &points, 
+        std::optional<std::vector<PointMetadata>> &meta_opt, const Box &bbox, std::shared_ptr<EncodingLog> log = nullptr) const {
+        size_t n = points.size();
+        // Choose 4, 8 or 16. 16 is less passes but requires more memory for the histograms and it offers better performance in most cases.
+        constexpr int BITS_PER_PASS = 16;
+        constexpr int NUM_BUCKETS = 1 << BITS_PER_PASS;
+        constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
+        constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
+    
+    
+        Container buffer(n);
+        std::vector<PointMetadata> metadata_buffer;
+        if (meta_opt) metadata_buffer.resize(n);
+    
+        for (int pass = 0; pass < NUM_PASSES; pass++) {
+            int shift = pass * BITS_PER_PASS;
+    
+            // Step 1: Histogram
+            const int nThreads = omp_get_max_threads();
+            std::vector<std::vector<size_t>> localHist(nThreads, std::vector<size_t>(NUM_BUCKETS, 0));
+    
+            #pragma omp parallel
             {
-                int shift = pass * BITS_PER_PASS;
-
-                // Step 1: Histogram
-                const int nThreads = omp_get_max_threads();
-                std::vector<std::vector<size_t>> localHist(nThreads, std::vector<size_t>(NUM_BUCKETS, 0));
-
-// tw.start();
-#pragma omp parallel
-                {
-                    int tid = omp_get_thread_num();
-                    auto &hist = localHist[tid];
-#pragma omp for schedule(static)
-                    for (size_t i = 0; i < n; ++i)
-                    {
-                        size_t encoded_key = encodeFromPoint(points[i], bbox);
-                        size_t bucket = (encoded_key >> shift) & BUCKET_MASK;
-                        hist[bucket]++;
-                    }
+                int tid = omp_get_thread_num();
+                auto& hist = localHist[tid];
+                #pragma omp for nowait schedule(static)
+                for (size_t i = 0; i < n; ++i) {
+                    size_t encoded_key = encodeFromPoint(points[i], bbox);
+                    size_t bucket = (encoded_key >> shift) & BUCKET_MASK;
+                    hist[bucket]++;
                 }
-                // tw.stop();
-                // std::cout << "Step1: " << tw.getElapsedDecimalSeconds() << " segundos" << std::endl;
-
-                // Step 2: Scan histograms to offsets
-                size_t offset = 0;
-                for (int b = 0; b < NUM_BUCKETS; b++)
-                {
-                    for (int t = 0; t < nThreads; t++)
-                    {
-                        size_t val = localHist[t][b];
-                        localHist[t][b] = offset;
-                        offset += val;
-                    }
-                }
-
-// tw.start();
-//  Step 3: Scatter to buffer using per-thread offsets
-#pragma omp parallel
-                {
-                    int tid = omp_get_thread_num();
-                    auto &localOffset = localHist[tid];
-
-#pragma omp for schedule(static)
-                    for (size_t i = 0; i < n; i++)
-                    {
-                        size_t encoded_key = encodeFromPoint(points[i], bbox);
-                        size_t bucket = (encoded_key >> shift) & BUCKET_MASK;
-                        size_t pos = localOffset[bucket]++;
-                        buffer[pos] = points[i];
-                        if (meta_opt)
-                            metadata_buffer[pos] = (*meta_opt)[i];
-                    }
-                }
-                // tw.stop();
-                // std::cout << "Step3: " << tw.getElapsedDecimalSeconds() << " segundos" << std::endl;
-
-                std::swap(points, buffer);
-                if (meta_opt)
-                    std::swap(*meta_opt, metadata_buffer);
             }
-
-            // Final encoding
-            std::vector<key_t> keys(n);
-#pragma omp parallel for schedule(static)
-            for (size_t i = 0; i < n; ++i)
+    
+            // Step 2: Scan histograms to offsets
+            size_t offset = 0;
+            for (int b = 0; b < NUM_BUCKETS; b++) {
+                for (int t = 0; t < nThreads; t++) {
+                    size_t val = localHist[t][b];
+                    localHist[t][b] = offset;
+                    offset += val;
+                }
+            }
+    
+            // Step 3: Scatter to buffer using per-thread offsets
+            #pragma omp parallel
             {
-                keys[i] = encodeFromPoint(points[i], bbox);
+                int tid = omp_get_thread_num();
+                auto& localOffset = localHist[tid];
+    
+                #pragma omp for schedule(static)
+                for (size_t i = 0; i < n; i++) {
+                    size_t encoded_key = encodeFromPoint(points[i], bbox);
+                    size_t bucket = (encoded_key >> shift) & BUCKET_MASK;
+                    size_t pos = localOffset[bucket]++;
+                    buffer.set(pos, points[i]);
+                    if (meta_opt) metadata_buffer[pos] = (*meta_opt)[i];
+                }
             }
-
-            return keys;
+    
+            std::swap(points, buffer);
+            if (meta_opt) std::swap(*meta_opt, metadata_buffer);
         }
+
+    
+        // Final encoding
+        std::vector<key_t> keys(n);
+        #pragma omp parallel for schedule(static)
+        for (size_t i = 0; i < n; ++i) {
+            keys[i] = encodeFromPoint(points[i], bbox);
+        }
+
+    
+        return keys;
+    }
 
     /**
          * @brief Parallel radix sort implementation for the SFC reordering.
@@ -617,7 +601,7 @@ public:
 #pragma omp parallel
                 {
                     auto &hist = localHist[omp_get_thread_num()];
-#pragma omp for schedule(static)
+#pragma omp for schedule(dinamic)
                     for (size_t i = 0; i < n - 7; i += 8)
                     {
                         __m512i bucket_indices = _mm512_loadu_epi64((__m512i *)&keys[i]);
