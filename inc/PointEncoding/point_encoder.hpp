@@ -399,11 +399,6 @@ public:
                 //printf("Using SoA container type for encoding\n");
                 keys.resize(n);
                 encodePointsVectorized(points, bbox, keys);
-                for(size_t i = 0; i < n; ++i) {
-                    if(keys[i] != encodeFromPoint(points[i], bbox)){
-                        printf("Error\n");
-                    }
-                }
             }
             else{
                 keys = encodePoints(points, bbox);
