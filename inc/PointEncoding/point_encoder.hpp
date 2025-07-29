@@ -7,6 +7,7 @@
 #include "Geometry/PointMetadata.hpp"
 #include "benchmarking/encoding_log.hpp"
 #include "TimeWatcher.hpp"
+#include <immintrin.h>
 #include <bitset>
 
 // Base class for all Encoders
