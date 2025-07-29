@@ -490,7 +490,7 @@ public:
 
             // Encoding
             if(mainOptions.containerType == ContainerType::SoA && this->getEncoder() == EncoderType::HILBERT_ENCODER_3D) {
-                printf("Using SoA container type for encoding\n");
+                //printf("Using SoA container type for encoding\n");
                 keys.resize(n);
                 encodePointsVectorized(points, bbox, keys);
             }
