@@ -167,6 +167,18 @@ public:
         __m256i vy = _mm256_load_si256((__m256i *)(const uint32_t *)y);
         __m256i vz = _mm256_load_si256((__m256i *)(const uint32_t *)z);
 
+        alignas(32) uint32_t debug_x[8], debug_y[8], debug_z[8];
+        _mm256_store_si256((__m256i*)debug_x, vx);
+        _mm256_store_si256((__m256i*)debug_y, vy);
+        _mm256_store_si256((__m256i*)debug_z, vz);
+        printf("vx: ");
+        for (int dbg_i = 0; dbg_i < 8; ++dbg_i) printf("%u ", debug_x[dbg_i]);
+        printf("\nvy: ");
+        for (int dbg_i = 0; dbg_i < 8; ++dbg_i) printf("%u ", debug_y[dbg_i]);
+        printf("\nvz: ");
+        for (int dbg_i = 0; dbg_i < 8; ++dbg_i) printf("%u ", debug_z[dbg_i]);
+        printf("\n");
+
         // Constants
         __m256i one = _mm256_set1_epi32(1);
         __m256i zero = _mm256_setzero_si256();
