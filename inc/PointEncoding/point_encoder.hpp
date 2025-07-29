@@ -399,9 +399,9 @@ public:
                 //printf("Using SoA container type for encoding\n");
                 keys.resize(n);
                 encodePointsVectorized(points, bbox, keys);
-                for(size_t i=0; i < n; i++) {
-                    if(keys[i] != encodeFromPoint(points[i], bbox)) {
-                        printf("Error in encoding at index %zu: %lu != %lu\n", i, keys[i], encodeFromPoint(points[i], bbox));
+                for(size_t i = 0; i < n; ++i) {
+                    if(keys[i] != encodeFromPoint(points[i], bbox)){
+                        printf("Error\n");
                     }
                 }
             }
@@ -410,12 +410,10 @@ public:
             }
 
             std::vector<key_t> buffer(n);
-            std::vector<PointMetadata> metadata_buffer;
-
             Container bufferDecoded(n);
+            std::vector<PointMetadata> metadata_buffer;
             if (meta_opt)
                 metadata_buffer.resize(n);
-
 
             for (int pass = 0; pass < NUM_PASSES; pass++)
             {
@@ -460,7 +458,6 @@ public:
                         size_t pos = localOffset[bucket]++;
                         buffer[pos] = keys[i];
                         bufferDecoded.set(pos, points[i]);
-                        
                         if (meta_opt)
                             metadata_buffer[pos] = (*meta_opt)[i];
                     }
@@ -471,9 +468,6 @@ public:
                 if (meta_opt)
                     std::swap(*meta_opt, metadata_buffer);
             }
-
-            isOrdered(points, bbox);
-            isOrdered(bufferDecoded, bbox);
 
             return keys;
     }
@@ -509,24 +503,24 @@ public:
         auto localPoints = points; // Make a local copy of the points to avoid modifying the original array
 std::vector<key_t> keys;
 
-        //tw.start();
-        //keys = sortPoints<Container>(localPoints, meta_opt, bbox, log);
-        //tw.stop();
-        //std::cout << "Sorting time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
-        //isOrdered(keys);
-        //isOrdered(localPoints, bbox);
+        tw.start();
+        keys = sortPoints<Container>(localPoints, meta_opt, bbox, log);
+        tw.stop();
+        std::cout << "Sorting time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
+        isOrdered(keys);
+        isOrdered(localPoints, bbox);
 
 
-        //sortPoints_Optimized<Container>(localPoints, meta_opt, bbox, log);
-        //sortPoints_Optimized<Container>(localPoints, meta_opt, bbox, log);
+        sortPoints_Optimized<Container>(localPoints, meta_opt, bbox, log);
+        sortPoints_Optimized<Container>(localPoints, meta_opt, bbox, log);
 
         localPoints = points;
-        //tw.start();
+        tw.start();
         keys = sortPoints_Optimized<Container>(localPoints, meta_opt, bbox, log);
-        //tw.stop();
+        tw.stop();
         std::cout << "Sorting-Optimized time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
-        //isOrdered(keys);
-        //isOrdered(localPoints, bbox);
+        isOrdered(keys);
+        isOrdered(localPoints, bbox);
 
         // Call the regular sortPoints with metadata
         return std::make_pair(keys, bbox);
