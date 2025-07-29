@@ -589,7 +589,7 @@ public:
             log->boundingBoxTime = tw.getElapsedDecimalSeconds();
         }
 
-
+std::vector<key_t> keys
 
         auto localPoints = points; // Make a local copy of the points to avoid modifying the original array
 /*
