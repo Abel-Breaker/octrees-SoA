@@ -297,8 +297,8 @@ public:
         constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
         constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
     
-        TimeWatcher tw;
-        tw.start();
+        //TimeWatcher tw;
+        //tw.start();
     
         Container buffer(n);
         std::vector<PointMetadata> metadata_buffer;
@@ -353,9 +353,9 @@ public:
             if (meta_opt) std::swap(*meta_opt, metadata_buffer);
         }
     
-        tw.stop();
-        if (log) log->sortingTime = tw.getElapsedDecimalSeconds();
-        tw.start();
+        //tw.stop();
+        //if (log) log->sortingTime = tw.getElapsedDecimalSeconds();
+        //tw.start();
     
         // Final encoding
         std::vector<key_t> keys(n);
@@ -364,8 +364,8 @@ public:
             keys[i] = encodeFromPoint(points[i], bbox);
         }
     
-        tw.stop();
-        if (log) log->encodingTime = tw.getElapsedDecimalSeconds();
+        //tw.stop();
+        //if (log) log->encodingTime = tw.getElapsedDecimalSeconds();
     
         return keys;
     }
@@ -592,12 +592,14 @@ public:
 
 
         auto localPoints = points; // Make a local copy of the points to avoid modifying the original array
-
+/*
         tw.start();
         std::vector<key_t> keys = sortPoints<Container>(localPoints, meta_opt, bbox, log);
         tw.stop();
         std::cout << "Sorting time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
-        isOrdered(keys);
+        isOrdered(keys);*/
+        sortPoints_Optimized<Container>(localPoints, meta_opt, bbox, log);
+        sortPoints_Optimized<Container>(localPoints, meta_opt, bbox, log);
 
         localPoints = points;
         tw.start();
@@ -606,8 +608,13 @@ public:
         std::cout << "Sorting-Optimized time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
         isOrdered(keys);
 
+        localPoints = points; // Make a local copy of the points to avoid modifying the original array
+        sortPoints_Optimized_BMI<Container>(localPoints, meta_opt, bbox, log);
+        sortPoints_Optimized_BMI<Container>(localPoints, meta_opt, bbox, log);
+
+        localPoints = points; // Make a local copy of the points to avoid modifying the original array
         tw.start();
-        keys = sortPoints_Optimized_BMI<Container>(points, meta_opt, bbox, log);
+        keys = sortPoints_Optimized_BMI<Container>(localPoints, meta_opt, bbox, log);
         tw.stop();
         std::cout << "Sorting-Optimized-BMI time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
         isOrdered(keys);
