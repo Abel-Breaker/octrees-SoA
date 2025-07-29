@@ -612,7 +612,6 @@ public:
         std::cout << "Sorting-Optimized-BMI time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
         isOrdered(keys);
         // Call the regular sortPoints with metadata
-        exit(1);
         return std::make_pair(keys, bbox);
     }
 
