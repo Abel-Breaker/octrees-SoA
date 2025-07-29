@@ -49,14 +49,13 @@ void searchBenchmark(std::ofstream &outputFile, EncoderType encoding = EncoderTy
     std::optional<std::vector<PointMetadata>> metadata = std::move(pointMetaPair.second);
 
     auto& enc = getEncoder(encoding);
-    std::cout << "Using encoder: " << enc.getEncoderName() << std::endl;
     // Sort the point cloud
     auto [codes, box] = enc.sortPoints(points, metadata);
     // Prepare the search set (must be done after sorting since it indexes points)
-    //SearchSet searchSet = SearchSet(mainOptions.numSearches, points.size());
+    SearchSet searchSet = SearchSet(mainOptions.numSearches, points.size());
     // Run the benchmarks
-    //NeighborsBenchmark octreeBenchmarks(points, codes, box, enc, searchSet, outputFile);   
-    //octreeBenchmarks.runAllBenchmarks();    
+    NeighborsBenchmark octreeBenchmarks(points, codes, box, enc, searchSet, outputFile);   
+    octreeBenchmarks.runAllBenchmarks();    
 }
 
 /**
@@ -394,7 +393,6 @@ void testContainersMemLayout(EncoderType encoding = EncoderType::NO_ENCODING) {
 int main(int argc, char *argv[]) {
     // Set default OpenMP schedule: dynamic and auto chunk size
     omp_set_schedule(omp_sched_dynamic, 0);
-    printf("Número de hilos máximo: %d\n", omp_get_max_threads());
     processArgs(argc, argv);
     std::cout << std::fixed << std::setprecision(3); 
     if(mainOptions.cacheProfiling) {

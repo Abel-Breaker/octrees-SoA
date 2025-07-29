@@ -26,8 +26,6 @@ concept PointContainer =
 
 
 
-
-
 // -----------------------------------------------------
 // AoS container: wrapper around std::vector<Point>
 // -----------------------------------------------------

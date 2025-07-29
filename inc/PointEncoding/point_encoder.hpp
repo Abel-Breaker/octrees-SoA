@@ -8,10 +8,6 @@
 #include "benchmarking/encoding_log.hpp"
 #include "TimeWatcher.hpp"
 #include <bitset>
-#include <immintrin.h>
-#include <iostream>
-#include "point_containers.hpp"
-#include <cpuid.h>
 
 // Base class for all Encoders
 namespace PointEncoding {
@@ -24,16 +20,14 @@ public:
     virtual ~PointEncoder() = default;
 
     virtual key_t encode(coords_t x, coords_t y, coords_t z) const = 0;
-    virtual void encodeVectorized(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const = 0;
-    #ifdef __AVX512F__
-    virtual void encodeVectorizedAVX512(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const =0;
-    #endif // __AVX512F__
+    virtual void encodeVectorized(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const=0;
     virtual void decode(key_t code, coords_t &x, coords_t &y, coords_t &z) const = 0;
 
     virtual uint32_t maxDepth() const = 0;
     virtual double eps() const = 0;
     virtual key_t upperBound() const = 0;
     virtual uint32_t unusedBits() const = 0;
+    virtual EncoderType getEncoder() const =0; 
     virtual std::string getEncoderName() const = 0;
     virtual std::string getShortEncoderName() const = 0;
 
@@ -55,120 +49,19 @@ public:
     virtual key_t encodeFromPoint(const Point& p, const Box& bbox) const = 0;
 
     template <PointContainer Container>
-    void encodePoints(const Container &points, const Box &bbox, std::vector<key_t> &keys) const {
-        size_t n = points.size();
+    std::vector<key_t> encodePoints(const Container &points, const Box &bbox) const {
+        std::vector<key_t> codes(points.size());
         #pragma omp parallel for schedule(static)
-            for(size_t i = 0; i < n; i++) {
-                keys[i] = encodeFromPoint(points[i], bbox);
+            for(size_t i = 0; i < points.size(); i++) {
+                codes[i] = encodeFromPoint(points[i], bbox);
             }
+        return codes;
     }
 
-    template <PointContainer Container>
-    void encodePointsVectorized(const Container &points, const Box &bbox, std::vector<key_t> &keys) const
-    {
-        size_t n = points.size();
-
-        if constexpr (std::is_same_v<Container, PointsSoA>)
-        {
-            const auto *soa = dynamic_cast<const PointsSoA *>(&points);
-            if (!soa)
-            {
-                std::cerr << "  [Error] Could not cast to PointsSoA\n";
-                return;
-            }
-            
-            // Constants
-            __m256d bboxCenterX = _mm256_set1_pd(bbox.center().getX());
-            __m256d bboxCenterY = _mm256_set1_pd(bbox.center().getY());
-            __m256d bboxCenterZ = _mm256_set1_pd(bbox.center().getZ());
-            __m256d bboxRadiiX = _mm256_set1_pd(bbox.radii().getX());
-            __m256d bboxRadiiY = _mm256_set1_pd(bbox.radii().getY());
-            __m256d bboxRadiiZ = _mm256_set1_pd(bbox.radii().getZ());
-
-            
-            __m256d two = _mm256_set1_pd(2.0);
-            __m256d scale = _mm256_set1_pd(1 << maxDepth());
-            __m256d maxCoord = _mm256_set1_pd((1u << maxDepth()) - 1u);
-
-                // 2 Iterations of 4 elements, and acumulates 8 elements at a time
-                #pragma omp parallel
-                {
-                    #pragma omp for schedule(static)
-                    for (size_t i = 0; i < n - 7; i += 8)
-                    {
-                        alignas(32) uint32_t x[8], y[8], z[8];
-
-                        // Load 4 elements
-                        __m256d pointsX = _mm256_load_pd(soa->dataX() + i);
-                        __m256d pointsY = _mm256_load_pd(soa->dataY() + i);
-                        __m256d pointsZ = _mm256_load_pd(soa->dataZ() + i);
-
-                        // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
-                        __m256d x_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsX, bboxCenterX), bboxRadiiX), _mm256_mul_pd(two, bboxRadiiX));
-                        __m256d y_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsY, bboxCenterY), bboxRadiiY), _mm256_mul_pd(two, bboxRadiiY));
-                        __m256d z_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ), _mm256_mul_pd(two, bboxRadiiZ));
-
-                        // Scale to [0,2^L)^3 for morton encoding, handle edge case where coordinate could be 2^L if _transf is exactly 1.0
-                        __m256d x_scaled = _mm256_min_pd(_mm256_mul_pd(x_transf, scale), maxCoord);
-                        __m256d y_scaled = _mm256_min_pd(_mm256_mul_pd(y_transf, scale), maxCoord);
-                        __m256d z_scaled = _mm256_min_pd(_mm256_mul_pd(z_transf, scale), maxCoord);
-
-                        // Store
-                        alignas(32) double x_vals[4], y_vals[4], z_vals[4];
-                        _mm256_store_pd(x_vals, x_scaled);
-                        _mm256_store_pd(y_vals, y_scaled);
-                        _mm256_store_pd(z_vals, z_scaled);
-
-                        for (int j = 0; j < 4; ++j)
-                        {
-                            x[j] = static_cast<coords_t>(x_vals[j]);
-                            y[j] = static_cast<coords_t>(y_vals[j]);
-                            z[j] = static_cast<coords_t>(z_vals[j]);
-                        }
-
-                        // Second iteration
-                        pointsX = _mm256_load_pd(soa->dataX() + i + 4);
-                        pointsY = _mm256_load_pd(soa->dataY() + i + 4);
-                        pointsZ = _mm256_load_pd(soa->dataZ() + i + 4);
-
-                        // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
-                        x_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsX, bboxCenterX), bboxRadiiX), _mm256_mul_pd(two, bboxRadiiX));
-                        y_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsY, bboxCenterY), bboxRadiiY), _mm256_mul_pd(two, bboxRadiiY));
-                        z_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ), _mm256_mul_pd(two, bboxRadiiZ));
-
-                        // Scale to [0,2^L)^3 for morton encoding, handle edge case where coordinate could be 2^L if _transf is exactly 1.0
-                        x_scaled = _mm256_min_pd(_mm256_mul_pd(x_transf, scale), maxCoord);
-                        y_scaled = _mm256_min_pd(_mm256_mul_pd(y_transf, scale), maxCoord);
-                        z_scaled = _mm256_min_pd(_mm256_mul_pd(z_transf, scale), maxCoord);
-
-                        // Store
-                        _mm256_store_pd(x_vals, x_scaled);
-                        _mm256_store_pd(y_vals, y_scaled);
-                        _mm256_store_pd(z_vals, z_scaled);
-
-                        for (int j = 0; j < 4; ++j)
-                        {
-                            x[j + 4] = static_cast<uint32_t>(x_vals[j]);
-                            y[j + 4] = static_cast<uint32_t>(y_vals[j]);
-                            z[j + 4] = static_cast<uint32_t>(z_vals[j]);
-                        }
-
-                        encodeVectorized(x, y, z, keys, i);
-                    }
-
-                    // Process remaining items
-                    #pragma omp single nowait
-                    for (size_t i = n - (n % 4); i < n; ++i)
-                    {
-                        keys[i] = encodeFromPoint(points[i], bbox);
-                    }
-                }
-            }
-        }
 
     #ifdef __AVX512F__
         template <PointContainer Container>
-        void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std::vector<key_t> &keys) const
+        void encodePointsVectorized(const Container &points, const Box &bbox, std::vector<key_t> &keys) const
         {
             size_t n = points.size();
 
@@ -263,7 +156,7 @@ public:
                         _mm256_store_si256((__m256i *)&y[8], y_uint);
                         _mm256_store_si256((__m256i *)&z[8], z_uint);
 
-                        encodeVectorizedAVX512(x, y, z, keys, i);
+                        encodeVectorized(x, y, z, keys, i);
                     }
 
                     // Process remaining items
@@ -275,220 +168,206 @@ public:
                 }
             }
         }
-    #endif // __AVX512F__
+    #else
+    template <PointContainer Container>
+    void encodePointsVectorized(const Container &points, const Box &bbox, std::vector<key_t> &keys) const
+    {
+        
+        size_t n = points.size();
 
-        /**
-         * @brief Parallel radix sort implementation for the SFC reordering.
-         *
-         * @returns The final array of encodings of the points
-         *
-         * @details This implementation computes the codes multiple times for each element, but since SFC time is very fast,
-         * it does not matter. Saving the codes in another buffer array takes more time as a lot more memory may
-         * be needed
-         *
-         */
-        template <PointContainer Container>
-        std::vector<key_t> sortPoints(Container &points,
-                                      std::optional<std::vector<PointMetadata>> &meta_opt, const Box &bbox, std::shared_ptr<EncodingLog> log = nullptr) const
+        if constexpr (std::is_same_v<Container, PointsSoA>)
         {
-            size_t n = points.size();
-            constexpr int BITS_PER_PASS = 8;
-            constexpr int NUM_BUCKETS = 1 << BITS_PER_PASS;
-            constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
-            constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
-
-            std::vector<key_t> keys(n);
-
-            // Encoding
-            TimeWatcher tw;
-            tw.start();
-            encodePoints(points, bbox, keys);
-            tw.stop();
-            std::cout << "Encoding time: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
-
-            tw.start();
-            encodePointsVectorized(points, bbox, keys);
-            tw.stop();
-            std::cout << "Encoding-Vectorized time: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
-
-            #ifdef __AVX512F__
-            tw.start();
-            encodePointsVectorizedAVX512(points, bbox, keys);
-            tw.stop();
-            std::cout << "Encoding-Vectorized-AVX512 time: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
-            #endif
-
-            std::vector<key_t> buffer(n);
-            std::vector<PointMetadata> metadata_buffer;
-
-
-            //tw.start();
-
-            Container bufferDecoded(n);
-            if (meta_opt)
-                metadata_buffer.resize(n);
-
-            for (int pass = 0; pass < NUM_PASSES; pass++)
+            const auto *soa = dynamic_cast<const PointsSoA *>(&points);
+            if (!soa)
             {
-                int shift = pass * BITS_PER_PASS;
+                std::cerr << "  [Error] Could not cast to PointsSoA\n";
+                return;
+            }
+            
+            // Constants
+            __m256d bboxCenterX = _mm256_set1_pd(bbox.center().getX());
+            __m256d bboxCenterY = _mm256_set1_pd(bbox.center().getY());
+            __m256d bboxCenterZ = _mm256_set1_pd(bbox.center().getZ());
+            __m256d bboxRadiiX = _mm256_set1_pd(bbox.radii().getX());
+            __m256d bboxRadiiY = _mm256_set1_pd(bbox.radii().getY());
+            __m256d bboxRadiiZ = _mm256_set1_pd(bbox.radii().getZ());
 
-                const int nThreads = omp_get_max_threads();
-                std::vector<std::vector<size_t>> localHist(nThreads, std::vector<size_t>(NUM_BUCKETS, 0));
+            
+            __m256d two = _mm256_set1_pd(2.0);
+            __m256d scale = _mm256_set1_pd(1 << maxDepth());
+            __m256d maxCoord = _mm256_set1_pd((1u << maxDepth()) - 1u);
+            
 
-                // Step 1: Histogram
+                // 2 Iterations of 4 elements, and acumulates 8 elements at a time
                 #pragma omp parallel
                 {
-                    auto &hist = localHist[omp_get_thread_num()];
                     #pragma omp for schedule(static)
-                    for (size_t i = 0; i < n; ++i)
+                    for (size_t i = 0; i < n - 7; i += 8)
                     {
-                        size_t bucket = (keys[i] >> shift) & BUCKET_MASK;
-                        hist[bucket]++;
-                    }
-                
+                        alignas(32) uint32_t x[8], y[8], z[8];
 
-                // Step 2: Scan histograms to offsets
-                #pragma omp single
-                {
-                    size_t offset = 0;
-                    for (int b = 0; b < NUM_BUCKETS; b++)
-                    {
-                        for (int t = 0; t < nThreads; t++)
+                        // Load 4 elements
+                        __m256d pointsX = _mm256_load_pd(soa->dataX() + i);
+                        __m256d pointsY = _mm256_load_pd(soa->dataY() + i);
+                        __m256d pointsZ = _mm256_load_pd(soa->dataZ() + i);
+
+                        // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
+                        __m256d x_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsX, bboxCenterX), bboxRadiiX), _mm256_mul_pd(two, bboxRadiiX));
+                        __m256d y_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsY, bboxCenterY), bboxRadiiY), _mm256_mul_pd(two, bboxRadiiY));
+                        __m256d z_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ), _mm256_mul_pd(two, bboxRadiiZ));
+
+                        // Scale to [0,2^L)^3 for morton encoding, handle edge case where coordinate could be 2^L if _transf is exactly 1.0
+                        __m256d x_scaled = _mm256_min_pd(_mm256_mul_pd(x_transf, scale), maxCoord);
+                        __m256d y_scaled = _mm256_min_pd(_mm256_mul_pd(y_transf, scale), maxCoord);
+                        __m256d z_scaled = _mm256_min_pd(_mm256_mul_pd(z_transf, scale), maxCoord);
+
+                        // Store
+                        alignas(32) double x_vals[4], y_vals[4], z_vals[4];
+                        _mm256_store_pd(x_vals, x_scaled);
+                        _mm256_store_pd(y_vals, y_scaled);
+                        _mm256_store_pd(z_vals, z_scaled);
+
+                        for (int j = 0; j < 4; ++j)
                         {
-                            size_t val = localHist[t][b];
-                            localHist[t][b] = offset;
-                            offset += val;
+                            x[j] = static_cast<uint32_t>(x_vals[j]);
+                            y[j] = static_cast<uint32_t>(y_vals[j]);
+                            z[j] = static_cast<uint32_t>(z_vals[j]);
                         }
-                    }
-                }
 
-                // Step 3: Scatter to buffer using per-thread offsets
-                    auto &localOffset = localHist[omp_get_thread_num()];
-                    #pragma omp for schedule(static)
-                    for (size_t i = 0; i < n; i++)
+                        // Second iteration
+                        pointsX = _mm256_load_pd(soa->dataX() + i + 4);
+                        pointsY = _mm256_load_pd(soa->dataY() + i + 4);
+                        pointsZ = _mm256_load_pd(soa->dataZ() + i + 4);
+
+                        // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
+                        x_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsX, bboxCenterX), bboxRadiiX), _mm256_mul_pd(two, bboxRadiiX));
+                        y_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsY, bboxCenterY), bboxRadiiY), _mm256_mul_pd(two, bboxRadiiY));
+                        z_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ), _mm256_mul_pd(two, bboxRadiiZ));
+
+                        // Scale to [0,2^L)^3 for morton encoding, handle edge case where coordinate could be 2^L if _transf is exactly 1.0
+                        x_scaled = _mm256_min_pd(_mm256_mul_pd(x_transf, scale), maxCoord);
+                        y_scaled = _mm256_min_pd(_mm256_mul_pd(y_transf, scale), maxCoord);
+                        z_scaled = _mm256_min_pd(_mm256_mul_pd(z_transf, scale), maxCoord);
+
+                        // Store
+                        _mm256_store_pd(x_vals, x_scaled);
+                        _mm256_store_pd(y_vals, y_scaled);
+                        _mm256_store_pd(z_vals, z_scaled);
+
+                        for (int j = 0; j < 4; ++j)
+                        {
+                            x[j + 4] = static_cast<uint32_t>(x_vals[j]);
+                            y[j + 4] = static_cast<uint32_t>(y_vals[j]);
+                            z[j + 4] = static_cast<uint32_t>(z_vals[j]);
+                        }
+
+                        encodeVectorized(x, y, z, keys, i);
+                    }
+
+                    // Process remaining items
+                    #pragma omp single nowait
+                    for (size_t i = n - (n % 4); i < n; ++i)
                     {
-                        size_t bucket = (keys[i] >> shift) & BUCKET_MASK;
-                        size_t pos = localOffset[bucket]++;
-                        buffer[pos] = keys[i];
-                        bufferDecoded[pos] = points[i];
-                        if (meta_opt)
-                            metadata_buffer[pos] = (*meta_opt)[i];
+                        keys[i] = encodeFromPoint(points[i], bbox);
                     }
                 }
-
-                std::swap(points, bufferDecoded);
-                std::swap(keys, buffer);
-                if (meta_opt)
-                    std::swap(*meta_opt, metadata_buffer);
             }
-
-            //tw.stop();
-            //std::cout << "Sort time: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
-
-
-            return keys;
-    }
-
-    /**
-         * @brief Parallel radix sort implementation for the SFC reordering.
-         *
-         * @returns The final array of encodings of the points
-         *
-         * @details This implementation computes the codes multiple times for each element, but since SFC time is very fast,
-         * it does not matter. Saving the codes in another buffer array takes more time as a lot more memory may
-         * be needed
-         *
-         */
-        template <PointContainer Container>
-        std::vector<key_t> sortPoints_Basic(Container &points,
-                                 std::optional<std::vector<PointMetadata>> &meta_opt, const Box &bbox) const
-        {
-            size_t n = points.size();
-            // Choose 4, 8 or 16. 16 is less passes but requires more memory for the histograms and it offers better performance in most cases.
-            constexpr int BITS_PER_PASS = 8;
-            constexpr int NUM_BUCKETS = 1 << BITS_PER_PASS;
-            constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
-            constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
-
-            TimeWatcher tw;
-
-            Container buffer(n);
-            std::vector<PointMetadata> metadata_buffer;
-            if (meta_opt)
-                metadata_buffer.resize(n);
-
-            for (int pass = 0; pass < NUM_PASSES; pass++)
-            {
-                int shift = pass * BITS_PER_PASS;
-
-                // Step 1: Histogram
-                const int nThreads = omp_get_max_threads();
-                std::vector<std::vector<size_t>> localHist(nThreads, std::vector<size_t>(NUM_BUCKETS, 0));
-
-// tw.start();
-#pragma omp parallel
-                {
-                    int tid = omp_get_thread_num();
-                    auto &hist = localHist[tid];
-#pragma omp for nowait schedule(static)
-                    for (size_t i = 0; i < n; ++i)
-                    {
-                        size_t encoded_key = encodeFromPoint(points[i], bbox);
-                        size_t bucket = (encoded_key >> shift) & BUCKET_MASK;
-                        hist[bucket]++;
-                    }
-                }
-                // tw.stop();
-                // std::cout << "Step1: " << tw.getElapsedDecimalSeconds() << " segundos" << std::endl;
-
-                // Step 2: Scan histograms to offsets
-                size_t offset = 0;
-                for (int b = 0; b < NUM_BUCKETS; b++)
-                {
-                    for (int t = 0; t < nThreads; t++)
-                    {
-                        size_t val = localHist[t][b];
-                        localHist[t][b] = offset;
-                        offset += val;
-                    }
-                }
-
-// tw.start();
-//  Step 3: Scatter to buffer using per-thread offsets
-#pragma omp parallel
-                {
-                    int tid = omp_get_thread_num();
-                    auto &localOffset = localHist[tid];
-
-#pragma omp for schedule(static)
-                    for (size_t i = 0; i < n; i++)
-                    {
-                        size_t encoded_key = encodeFromPoint(points[i], bbox);
-                        size_t bucket = (encoded_key >> shift) & BUCKET_MASK;
-                        size_t pos = localOffset[bucket]++;
-                        buffer[pos] = points[i];
-                        if (meta_opt)
-                            metadata_buffer[pos] = (*meta_opt)[i];
-                    }
-                }
-                // tw.stop();
-                // std::cout << "Step3: " << tw.getElapsedDecimalSeconds() << " segundos" << std::endl;
-
-                std::swap(points, buffer);
-                if (meta_opt)
-                    std::swap(*meta_opt, metadata_buffer);
-            }
-
-            // Final encoding
-            std::vector<key_t> keys(n);
-#pragma omp parallel for schedule(static)
-            for (size_t i = 0; i < n; ++i)
-            {
-                keys[i] = encodeFromPoint(points[i], bbox);
-            }
-
-            return keys;
         }
+        #endif
+    
+   
+    /**
+     * @brief Parallel radix sort implementation for the SFC reordering.
+     * 
+     * @returns The final array of encodings of the points
+     * 
+     * @details This implementation computes the codes multiple times for each element, but since SFC time is very fast,
+     * it does not matter. Saving the codes in another buffer array takes more time as a lot more memory may
+     * be needed
+     * 
+     */
+    template <PointContainer Container>
+    std::vector<key_t> sortPoints(Container &points, 
+        std::optional<std::vector<PointMetadata>> &meta_opt, const Box &bbox, std::shared_ptr<EncodingLog> log = nullptr) const {
+        size_t n = points.size();
+        // Choose 4, 8 or 16. 16 is less passes but requires more memory for the histograms and it offers better performance in most cases.
+        constexpr int BITS_PER_PASS = 16;
+        constexpr int NUM_BUCKETS = 1 << BITS_PER_PASS;
+        constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
+        constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
+    
+        TimeWatcher tw;
+        tw.start();
+    
+        Container buffer(n);
+        std::vector<PointMetadata> metadata_buffer;
+        if (meta_opt) metadata_buffer.resize(n);
+    
+        for (int pass = 0; pass < NUM_PASSES; pass++) {
+            int shift = pass * BITS_PER_PASS;
+    
+            // Step 1: Histogram
+            const int nThreads = omp_get_max_threads();
+            std::vector<std::vector<size_t>> localHist(nThreads, std::vector<size_t>(NUM_BUCKETS, 0));
+    
+            #pragma omp parallel
+            {
+                int tid = omp_get_thread_num();
+                auto& hist = localHist[tid];
+                #pragma omp for nowait schedule(static)
+                for (size_t i = 0; i < n; ++i) {
+                    size_t encoded_key = encodeFromPoint(points[i], bbox);
+                    size_t bucket = (encoded_key >> shift) & BUCKET_MASK;
+                    hist[bucket]++;
+                }
+            }
+    
+            // Step 2: Scan histograms to offsets
+            size_t offset = 0;
+            for (int b = 0; b < NUM_BUCKETS; b++) {
+                for (int t = 0; t < nThreads; t++) {
+                    size_t val = localHist[t][b];
+                    localHist[t][b] = offset;
+                    offset += val;
+                }
+            }
+    
+            // Step 3: Scatter to buffer using per-thread offsets
+            #pragma omp parallel
+            {
+                int tid = omp_get_thread_num();
+                auto& localOffset = localHist[tid];
+    
+                #pragma omp for schedule(static)
+                for (size_t i = 0; i < n; i++) {
+                    size_t encoded_key = encodeFromPoint(points[i], bbox);
+                    size_t bucket = (encoded_key >> shift) & BUCKET_MASK;
+                    size_t pos = localOffset[bucket]++;
+                    buffer.set(pos, points[i]);
+                    if (meta_opt) metadata_buffer[pos] = (*meta_opt)[i];
+                }
+            }
+    
+            std::swap(points, buffer);
+            if (meta_opt) std::swap(*meta_opt, metadata_buffer);
+        }
+    
+        tw.stop();
+        if (log) log->sortingTime = tw.getElapsedDecimalSeconds();
+        tw.start();
+    
+        // Final encoding
+        std::vector<key_t> keys(n);
+        #pragma omp parallel for schedule(static)
+        for (size_t i = 0; i < n; ++i) {
+            keys[i] = encodeFromPoint(points[i], bbox);
+        }
+    
+        tw.stop();
+        if (log) log->encodingTime = tw.getElapsedDecimalSeconds();
+    
+        return keys;
+    }
 
     /**
          * @brief Parallel radix sort implementation for the SFC reordering.
@@ -509,13 +388,18 @@ public:
             constexpr int NUM_BUCKETS = 1 << BITS_PER_PASS;
             constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
             constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
-
-            std::vector<key_t> keys(n);
+            
+            std::vector<key_t> keys;
 
             // Encoding
-            encodePointsVectorized(points, bbox, keys);
-
-
+            if(mainOptions.containerType == ContainerType::SoA && this->getEncoder() == EncoderType::HILBERT_ENCODER_3D) {
+                printf("Using SoA container type for encoding\n");
+                keys.resize(n);
+                encodePointsVectorized(points, bbox, keys);
+            }
+            else{
+                keys = encodePoints(points, bbox);
+            }
 
             std::vector<key_t> buffer(n);
             std::vector<PointMetadata> metadata_buffer;
@@ -581,86 +465,85 @@ public:
             return keys;
     }
 
-#ifdef __AVX512F__
-    template <PointContainer Container>
-    std::vector<key_t> sortPoints_Optimized_AVX512(Container &points,
-                                                   std::optional<std::vector<PointMetadata>> &meta_opt, const Box &bbox, std::shared_ptr<EncodingLog> log = nullptr) const
-    {
-        size_t n = points.size();
-        constexpr int BITS_PER_PASS = 8;
-        constexpr int NUM_BUCKETS = 1 << BITS_PER_PASS;
-        constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
-        constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
-        __m512i one = _mm512_set1_epi64(1);
-
-        std::vector<key_t> keys(n);
-
-        // Encoding
-        encodePointsVectorized(points, bbox, keys);
-
-        std::vector<key_t> buffer(n);
-        std::vector<PointMetadata> metadata_buffer;
-
-        Container bufferDecoded(n);
-        if (meta_opt)
-            metadata_buffer.resize(n);
-
-        for (int pass = 0; pass < NUM_PASSES; pass++)
+    /**
+         * @brief Parallel radix sort implementation for the SFC reordering.
+         *
+         * @returns The final array of encodings of the points
+         *
+         * @details This implementation computes the codes multiple times for each element, but since SFC time is very fast,
+         * it does not matter. Saving the codes in another buffer array takes more time as a lot more memory may
+         * be needed
+         *
+         */
+        template <PointContainer Container>
+        std::vector<key_t> sortPoints_Optimized_BMI(Container &points,
+                                      std::optional<std::vector<PointMetadata>> &meta_opt, const Box &bbox, std::shared_ptr<EncodingLog> log = nullptr) const
         {
-            int shift = pass * BITS_PER_PASS;
+            size_t n = points.size();
+            constexpr int BITS_PER_PASS = 8;
+            constexpr int NUM_BUCKETS = 1 << BITS_PER_PASS;
+            constexpr size_t BUCKET_MASK = NUM_BUCKETS - 1;
+            constexpr int NUM_PASSES = sizeof(key_t) * 8 / BITS_PER_PASS;
+            
+            std::vector<key_t> keys;
 
-            const int nThreads = omp_get_max_threads();
-            std::vector<std::vector<size_t>> localHist(nThreads, std::vector<size_t>(NUM_BUCKETS, 0));
+            // Encoding
+            if(mainOptions.containerType == ContainerType::SoA && this->getEncoder() == EncoderType::HILBERT_ENCODER_3D) {
+                printf("Using SoA container type for encoding\n");
+                keys.resize(n);
+                encodePointsVectorized(points, bbox, keys);
+            }
+            else{
+                keys = encodePoints(points, bbox);
+            }
 
-// Step 1: Histogram
-#pragma omp parallel
+            std::vector<key_t> buffer(n);
+            std::vector<PointMetadata> metadata_buffer;
+
+            Container bufferDecoded(n);
+            if (meta_opt)
+                metadata_buffer.resize(n);
+
+            for (int pass = 0; pass < NUM_PASSES; pass++)
+            {
+                int shift = pass * BITS_PER_PASS;
+
+                const int nThreads = omp_get_max_threads();
+                std::vector<std::vector<size_t>> localHist(nThreads, std::vector<size_t>(NUM_BUCKETS, 0));
+
+                // Step 1: Histogram
+                #pragma omp parallel
                 {
                     auto &hist = localHist[omp_get_thread_num()];
-#pragma omp for schedule(dynamic)
-                    for (size_t i = 0; i < n - 7; i += 8)
+                    #pragma omp for schedule(static)
+                    for (size_t i = 0; i < n; ++i)
                     {
-                        __m512i bucket_indices = _mm512_loadu_epi64((__m512i *)&keys[i]);
-                        bucket_indices = _mm512_srli_epi64(bucket_indices, shift);
-                        bucket_indices = _mm512_and_si512(bucket_indices, _mm512_set1_epi64(BUCKET_MASK));
-
-                        alignas(64) uint64_t indices[8];                    // 64 bytes = 512 bits
-                        _mm512_store_si512((__m512i *)indices, bucket_indices); // result_and: __m512i
-
-                        // Bucle escalar para incrementar histograma
-                        for (int j = 0; j < 8; ++j)
-                        {
-                            hist[indices[j]]++;
-                        }
-                    }
-
-#pragma omp single
-                    for (size_t i = n - (n % 8); i < n; ++i)
-                    {
-                        size_t bucket = (keys[i] >> shift) & BUCKET_MASK;
+                        size_t bucket = _bextr_u64(keys[i], shift, BITS_PER_PASS);
                         hist[bucket]++;
                     }
+                
 
-// Step 2: Scan histograms to offsets
-#pragma omp single
+                // Step 2: Scan histograms to offsets
+                #pragma omp single
+                {
+                    size_t offset = 0;
+                    for (int b = 0; b < NUM_BUCKETS; b++)
                     {
-                        size_t offset = 0;
-                        for (int b = 0; b < NUM_BUCKETS; b++)
+                        for (int t = 0; t < nThreads; t++)
                         {
-                            for (int t = 0; t < nThreads; t++)
-                            {
-                                size_t val = localHist[t][b];
-                                localHist[t][b] = offset;
-                                offset += val;
-                            }
+                            size_t val = localHist[t][b];
+                            localHist[t][b] = offset;
+                            offset += val;
                         }
                     }
+                }
 
-                    // Step 3: Scatter to buffer using per-thread offsets
+                // Step 3: Scatter to buffer using per-thread offsets
                     auto &localOffset = localHist[omp_get_thread_num()];
-#pragma omp for schedule(static)
+                    #pragma omp for schedule(static)
                     for (size_t i = 0; i < n; i++)
                     {
-                        size_t bucket = (keys[i] >> shift) & BUCKET_MASK;
+                        size_t bucket = _bextr_u64(keys[i], shift, BITS_PER_PASS);
                         size_t pos = localOffset[bucket]++;
                         buffer[pos] = keys[i];
                         bufferDecoded[pos] = points[i];
@@ -676,69 +559,63 @@ public:
             }
 
             return keys;
-        }
-#endif
+    }
 
-        /**
-         * @brief This function computes the encodings of the points and sorts them in
-         * the given order. The points array is altered in-place here!
-         *
-         * @details This is the main reordering function that we use to achieve spatial locality during neighbourhood
-         * searches. Encodings are first computed using encodeFromPoint, put into a pairs vector and then reordered.
-         *
-         * @param points The input/output array of 3D points (i.e. the point cloud)
-         * @param codes The output array of computed codes (allocated here, only pass unallocated reference)
-         * @param bbox The precomputed global bounding box of points
-         * @param meta_opt The optional metadata of the point cloud (if Lpoint is used, it is contained on the struct).
-         * meta_opt is a parallel array to points and will be sorted in the same order
-         */
-        template <PointContainer Container>
-        std::pair<std::vector<key_t>, Box> sortPoints(Container &points,
-                                                      std::optional<std::vector<PointMetadata>> &meta_opt, std::shared_ptr<EncodingLog> log = nullptr) const
-        {
-            // Find the bbox
-            TimeWatcher tw;
-            tw.start();
-            Vector radii;
-            Point center = mbb(points, radii);
-            Box bbox = Box(center, radii);
-            tw.stop();
-            if (log)
-            {
-                log->boundingBoxTime = tw.getElapsedDecimalSeconds();
-            }
-            // Call the regular sortPoints with metadata
-
-            // Hacer una copia local de points
-            auto local_points = points; // deducción explícita con copia
-            std::vector<key_t> keys;
-
-            tw.start();
-            keys = sortPoints_Basic<Container>(local_points, meta_opt, bbox);
-            tw.stop();
-            std::cout << "Sort time base: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
-            std::cout << "Sorted - Sort time Base:" << std::boolalpha << isOrdered(keys) << std::endl;
-
-            local_points = points; // deducción explícita con copia
-            tw.start();
-            keys = sortPoints_Optimized<Container>(local_points, meta_opt, bbox, log);
-            tw.stop();
-            std::cout << "Sort time optimized: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
-            std::cout << "Sorted - Sort time optimized:" << std::boolalpha << isOrdered(keys) << std::endl;
-
-#ifdef __AVX512F__
-            local_points = points; // deducción explícita con copia
-            tw.start();
-            keys = sortPoints_Optimized_AVX512<Container>(local_points, meta_opt, bbox, log);
-            tw.stop();
-            std::cout << "Sort time optimized with AVX512: " << tw.getElapsedDecimalSeconds() << " seconds" << std::endl;
-            std::cout << "Sorted - Sort time optimized AVX512:" << std::boolalpha << isOrdered(keys) << std::endl;
-#endif
-
-            return std::make_pair(sortPoints<Container>(points, meta_opt, bbox, log), bbox);
+    /**
+     * @brief This function computes the encodings of the points and sorts them in
+     * the given order. The points array is altered in-place here!
+     * 
+     * @details This is the main reordering function that we use to achieve spatial locality during neighbourhood
+     * searches. Encodings are first computed using encodeFromPoint, put into a pairs vector and then reordered.
+     * 
+     * @param points The input/output array of 3D points (i.e. the point cloud)
+     * @param codes The output array of computed codes (allocated here, only pass unallocated reference)
+     * @param bbox The precomputed global bounding box of points
+     * @param meta_opt The optional metadata of the point cloud (if Lpoint is used, it is contained on the struct). 
+     * meta_opt is a parallel array to points and will be sorted in the same order
+     */
+    template <PointContainer Container>
+    std::pair<std::vector<key_t>, Box> sortPoints(Container &points, 
+        std::optional<std::vector<PointMetadata>> &meta_opt, std::shared_ptr<EncodingLog> log = nullptr) const {
+        // Find the bbox
+        TimeWatcher tw;
+        tw.start();
+        Vector radii;
+        Point center = mbb(points, radii);
+        Box bbox = Box(center, radii);
+        tw.stop();
+        if(log) {
+            log->boundingBoxTime = tw.getElapsedDecimalSeconds();
         }
 
-        bool isOrdered(const std::vector<key_t> &points) const
+
+
+        auto localPoints = points; // Make a local copy of the points to avoid modifying the original array
+
+        tw.start();
+        std::vector<key_t> keys = sortPoints<Container>(localPoints, meta_opt, bbox, log);
+        tw.stop();
+        std::cout << "Sorting time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
+        isOrdered(keys);
+
+        localPoints = points;
+        tw.start();
+        keys = sortPoints_Optimized<Container>(localPoints, meta_opt, bbox, log);
+        tw.stop();
+        std::cout << "Sorting-Optimized time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
+        isOrdered(keys);
+
+        tw.start();
+        keys = sortPoints_Optimized_BMI<Container>(points, meta_opt, bbox, log);
+        tw.stop();
+        std::cout << "Sorting-Optimized-BMI time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
+        isOrdered(keys);
+        // Call the regular sortPoints with metadata
+        exit(1);
+        return std::make_pair(keys, bbox);
+    }
+
+    bool isOrdered(const std::vector<key_t> &points) const
         {
 
             size_t n = points.size();
@@ -751,8 +628,10 @@ public:
                     return false;
                 }
             }
+            printf("Points are ordered\n");
             return true;
         }
+
 
     /**
      * @brief Get the center and radii of an octant at a given octree level.
