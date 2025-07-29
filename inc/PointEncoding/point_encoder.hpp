@@ -53,7 +53,8 @@ public:
     std::vector<key_t> encodePoints(const Container &points, const Box &bbox) const {
         std::vector<key_t> codes(points.size());
         #pragma omp parallel for schedule(static)
-            for(size_t i = 0; i < points.size(); i++) {
+            for(size_t i = 0; i < 1; i++) {
+                printf("x[%zu]: %f, y[%zu]: %f, z[%zu]: %f\n", i, points[i].getX(), i, points[i].getY(), i, points[i].getZ());
                 codes[i] = encodeFromPoint(points[i], bbox);
             }
         return codes;
@@ -203,7 +204,7 @@ public:
                 #pragma omp parallel
                 {
                     #pragma omp for schedule(static)
-                    for (size_t i = 0; i < 7; i += 8)
+                    for (size_t i = 0; i < n-7; i += 8)
                     {
                         alignas(32) uint32_t x[8], y[8], z[8];
 
@@ -233,6 +234,7 @@ public:
                             x[j] = static_cast<uint32_t>(x_vals[j]);
                             y[j] = static_cast<uint32_t>(y_vals[j]);
                             z[j] = static_cast<uint32_t>(z_vals[j]);
+                            //printf("x[%d]: %u, y[%d]: %u, z[%d]: %u\n", j, x[j], j, y[j], j, z[j]);
                         }
 
                         // Second iteration
@@ -399,7 +401,7 @@ public:
                 encodePointsVectorized(points, bbox, keys);
                 for(size_t i=0; i < n; i++) {
                     if(keys[i] != encodeFromPoint(points[i], bbox)) {
-                        //printf("Error in encoding at index %zu: %lu != %lu\n", i, keys[i], encodeFromPoint(points[i], bbox));
+                        printf("Error in encoding at index %zu: %lu != %lu\n", i, keys[i], encodeFromPoint(points[i], bbox));
                     }
                 }
             }
@@ -414,7 +416,6 @@ public:
             if (meta_opt)
                 metadata_buffer.resize(n);
 
-            bufferDecoded.resize(n);
 
             for (int pass = 0; pass < NUM_PASSES; pass++)
             {
@@ -459,9 +460,6 @@ public:
                         size_t pos = localOffset[bucket]++;
                         buffer[pos] = keys[i];
                         bufferDecoded.set(pos, points[i]);
-                        if(i < 5){
-                            printf("Encoded key %zu: %lu - %lu\n", i, keys[i], encodeFromPoint(points[i], bbox));
-                        }
                         
                         if (meta_opt)
                             metadata_buffer[pos] = (*meta_opt)[i];
@@ -509,22 +507,23 @@ public:
 
 
         auto localPoints = points; // Make a local copy of the points to avoid modifying the original array
+std::vector<key_t> keys;
 
-        tw.start();
-        std::vector<key_t> keys = sortPoints<Container>(localPoints, meta_opt, bbox, log);
-        tw.stop();
-        std::cout << "Sorting time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
-        isOrdered(keys);
-        isOrdered(localPoints, bbox);
+        //tw.start();
+        //keys = sortPoints<Container>(localPoints, meta_opt, bbox, log);
+        //tw.stop();
+        //std::cout << "Sorting time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
+        //isOrdered(keys);
+        //isOrdered(localPoints, bbox);
 
 
-        sortPoints_Optimized<Container>(localPoints, meta_opt, bbox, log);
-        sortPoints_Optimized<Container>(localPoints, meta_opt, bbox, log);
+        //sortPoints_Optimized<Container>(localPoints, meta_opt, bbox, log);
+        //sortPoints_Optimized<Container>(localPoints, meta_opt, bbox, log);
 
         localPoints = points;
-        tw.start();
+        //tw.start();
         keys = sortPoints_Optimized<Container>(localPoints, meta_opt, bbox, log);
-        tw.stop();
+        //tw.stop();
         std::cout << "Sorting-Optimized time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
         //isOrdered(keys);
         //isOrdered(localPoints, bbox);
