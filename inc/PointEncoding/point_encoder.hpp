@@ -396,7 +396,6 @@ public:
 
             // Encoding
             if(mainOptions.containerType == ContainerType::SoA && this->getEncoder() == EncoderType::HILBERT_ENCODER_3D) {
-                //printf("Using SoA container type for encoding\n");
                 keys.resize(n);
                 encodePointsVectorized(points, bbox, keys);
             }
@@ -496,7 +495,7 @@ public:
 
 
         auto localPoints = points; // Make a local copy of the points to avoid modifying the original array
-std::vector<key_t> keys;
+        std::vector<key_t> keys;
 
         tw.start();
         keys = sortPoints<Container>(localPoints, meta_opt, bbox, log);
@@ -518,7 +517,7 @@ std::vector<key_t> keys;
         isOrdered(localPoints, bbox);
 
         // Call the regular sortPoints with metadata
-        return std::make_pair(keys, bbox);
+        return std::make_pair(sortPoints_Optimized<Container>(points, meta_opt, bbox, log), bbox);
     }
 
     template <PointContainer Container>
