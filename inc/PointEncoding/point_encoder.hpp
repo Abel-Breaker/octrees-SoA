@@ -51,10 +51,10 @@ public:
 
     template <PointContainer Container>
     std::vector<key_t> encodePoints(const Container &points, const Box &bbox) const {
-        std::vector<key_t> codes(points.size());
+        size_t n = points.size();
+        std::vector<key_t> codes(n);
         #pragma omp parallel for schedule(static)
-            for(size_t i = 0; i < 1; i++) {
-                printf("x[%zu]: %f, y[%zu]: %f, z[%zu]: %f\n", i, points[i].getX(), i, points[i].getY(), i, points[i].getZ());
+            for(size_t i = 0; i < n; i++) {
                 codes[i] = encodeFromPoint(points[i], bbox);
             }
         return codes;
@@ -234,7 +234,6 @@ public:
                             x[j] = static_cast<uint32_t>(x_vals[j]);
                             y[j] = static_cast<uint32_t>(y_vals[j]);
                             z[j] = static_cast<uint32_t>(z_vals[j]);
-                            //printf("x[%d]: %u, y[%d]: %u, z[%d]: %u\n", j, x[j], j, y[j], j, z[j]);
                         }
 
                         // Second iteration
