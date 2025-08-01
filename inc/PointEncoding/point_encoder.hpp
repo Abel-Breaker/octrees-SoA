@@ -60,6 +60,221 @@ public:
         return codes;
     }
 
+    #ifdef __AVX512F__
+    template <PointContainer Container>
+        void encodePointsVectorizedAVX512(const Container &points, const Box &bbox, std::vector<key_t> &keys) const
+        {
+            size_t n = points.size();
+
+            if constexpr (std::is_same_v<Container, PointsSoA>)
+            {
+                const auto *soa = dynamic_cast<const PointsSoA *>(&points);
+                if (!soa)
+                {
+                    std::cerr << "  [Error] Could not cast to PointsSoA\n";
+                    return;
+                }
+
+                // Constants
+                __m512d bboxCenterX = _mm512_set1_pd(bbox.center().getX());
+                __m512d bboxCenterY = _mm512_set1_pd(bbox.center().getY());
+                __m512d bboxCenterZ = _mm512_set1_pd(bbox.center().getZ());
+                __m512d bboxRadiiX = _mm512_set1_pd(bbox.radii().getX());
+                __m512d bboxRadiiY = _mm512_set1_pd(bbox.radii().getY());
+                __m512d bboxRadiiZ = _mm512_set1_pd(bbox.radii().getZ());
+
+                __m512d two = _mm512_set1_pd(2.0);
+                __m512d scale = _mm512_set1_pd(1 << maxDepth());
+                __m512d maxCoord = _mm512_set1_pd((1u << maxDepth()) - 1u);
+
+                #pragma omp parallel
+                {
+                    #pragma omp for schedule(static)
+                    for (size_t i = 0; i < n - 15; i += 16)
+                    {
+                        alignas(64) double x_vals[8], y_vals[8], z_vals[8];
+                        alignas(64) uint32_t x[16], y[16], z[16];
+
+                        // Load 8 elements
+                        __m512d pointsX = _mm512_loadu_pd(soa->dataX() + i);
+                        __m512d pointsY = _mm512_loadu_pd(soa->dataY() + i);
+                        __m512d pointsZ = _mm512_loadu_pd(soa->dataZ() + i);
+
+                        // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
+                        __m512d x_transf = _mm512_div_pd(
+                            _mm512_add_pd(_mm512_sub_pd(pointsX, bboxCenterX), bboxRadiiX),
+                            _mm512_mul_pd(two, bboxRadiiX));
+                        __m512d y_transf = _mm512_div_pd(
+                            _mm512_add_pd(_mm512_sub_pd(pointsY, bboxCenterY), bboxRadiiY),
+                            _mm512_mul_pd(two, bboxRadiiY));
+                        __m512d z_transf = _mm512_div_pd(
+                            _mm512_add_pd(_mm512_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ),
+                            _mm512_mul_pd(two, bboxRadiiZ));
+
+                        // Scale to [0,2^L)^3 for morton encoding, handle edge case where coordinate could be 2^L if _transf is exactly 1.0
+                        __m512d x_scaled = _mm512_min_pd(_mm512_mul_pd(x_transf, scale), maxCoord);
+                        __m512d y_scaled = _mm512_min_pd(_mm512_mul_pd(y_transf, scale), maxCoord);
+                        __m512d z_scaled = _mm512_min_pd(_mm512_mul_pd(z_transf, scale), maxCoord);
+
+                        // Cast double to uint32_t
+                        __m256i x_uint = _mm512_cvttpd_epu32(x_scaled);
+                        __m256i y_uint = _mm512_cvttpd_epu32(y_scaled);
+                        __m256i z_uint = _mm512_cvttpd_epu32(z_scaled);
+
+                        // Store
+                        _mm256_store_si256((__m256i *)x, x_uint);
+                        _mm256_store_si256((__m256i *)y, y_uint);
+                        _mm256_store_si256((__m256i *)z, z_uint);
+
+                        // Second Iteration
+                        pointsX = _mm512_loadu_pd(soa->dataX() + i + 8);
+                        pointsY = _mm512_loadu_pd(soa->dataY() + i + 8);
+                        pointsZ = _mm512_loadu_pd(soa->dataZ() + i + 8);
+
+                        // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
+                        x_transf = _mm512_div_pd(
+                            _mm512_add_pd(_mm512_sub_pd(pointsX, bboxCenterX), bboxRadiiX),
+                            _mm512_mul_pd(two, bboxRadiiX));
+                        y_transf = _mm512_div_pd(
+                            _mm512_add_pd(_mm512_sub_pd(pointsY, bboxCenterY), bboxRadiiY),
+                            _mm512_mul_pd(two, bboxRadiiY));
+                        z_transf = _mm512_div_pd(
+                            _mm512_add_pd(_mm512_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ),
+                            _mm512_mul_pd(two, bboxRadiiZ));
+
+                        // Scale to [0,2^L)^3 for morton encoding, handle edge case where coordinate could be 2^L if _transf is exactly 1.0
+                        x_scaled = _mm512_min_pd(_mm512_mul_pd(x_transf, scale), maxCoord);
+                        y_scaled = _mm512_min_pd(_mm512_mul_pd(y_transf, scale), maxCoord);
+                        z_scaled = _mm512_min_pd(_mm512_mul_pd(z_transf, scale), maxCoord);
+
+                        // Cast double to uint32_t
+                        x_uint = _mm512_cvttpd_epu32(x_scaled);
+                        y_uint = _mm512_cvttpd_epu32(y_scaled);
+                        z_uint = _mm512_cvttpd_epu32(z_scaled);
+
+                        // Store
+                        _mm256_store_si256((__m256i *)&x[8], x_uint);
+                        _mm256_store_si256((__m256i *)&y[8], y_uint);
+                        _mm256_store_si256((__m256i *)&z[8], z_uint);
+
+                        encodeVectorized(x, y, z, keys, i);
+                    }
+
+                    // Process remaining items
+                    #pragma omp single nowait
+                    for (size_t i = n - (n % 16); i < n; ++i)
+                    {
+                        keys[i] = encodeFromPoint(points[i], bbox);
+                    }
+                }
+            }
+        }
+        #endif
+    template <PointContainer Container>
+    void encodePointsVectorizedAVX2(const Container &points, const Box &bbox, std::vector<key_t> &keys) const
+    {
+        
+        size_t n = points.size();
+
+        if constexpr (std::is_same_v<Container, PointsSoA>)
+        {
+            const auto *soa = dynamic_cast<const PointsSoA *>(&points);
+            if (!soa)
+            {
+                std::cerr << "  [Error] Could not cast to PointsSoA\n";
+                return;
+            }
+            
+            // Constants
+            __m256d bboxCenterX = _mm256_set1_pd(bbox.center().getX());
+            __m256d bboxCenterY = _mm256_set1_pd(bbox.center().getY());
+            __m256d bboxCenterZ = _mm256_set1_pd(bbox.center().getZ());
+            __m256d bboxRadiiX = _mm256_set1_pd(bbox.radii().getX());
+            __m256d bboxRadiiY = _mm256_set1_pd(bbox.radii().getY());
+            __m256d bboxRadiiZ = _mm256_set1_pd(bbox.radii().getZ());
+
+            
+            __m256d two = _mm256_set1_pd(2.0);
+            __m256d scale = _mm256_set1_pd(1 << maxDepth());
+            __m256d maxCoord = _mm256_set1_pd((1u << maxDepth()) - 1u);
+            
+
+                // 2 Iterations of 4 elements, and acumulates 8 elements at a time
+                #pragma omp parallel
+                {
+                    #pragma omp for schedule(static)
+                    for (size_t i = 0; i < n-7; i += 8)
+                    {
+                        alignas(32) uint32_t x[8], y[8], z[8];
+
+                        // Load 4 elements
+                        __m256d pointsX = _mm256_load_pd(soa->dataX() + i);
+                        __m256d pointsY = _mm256_load_pd(soa->dataY() + i);
+                        __m256d pointsZ = _mm256_load_pd(soa->dataZ() + i);
+
+                        // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
+                        __m256d x_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsX, bboxCenterX), bboxRadiiX), _mm256_mul_pd(two, bboxRadiiX));
+                        __m256d y_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsY, bboxCenterY), bboxRadiiY), _mm256_mul_pd(two, bboxRadiiY));
+                        __m256d z_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ), _mm256_mul_pd(two, bboxRadiiZ));
+
+                        // Scale to [0,2^L)^3 for morton encoding, handle edge case where coordinate could be 2^L if _transf is exactly 1.0
+                        __m256d x_scaled = _mm256_min_pd(_mm256_mul_pd(x_transf, scale), maxCoord);
+                        __m256d y_scaled = _mm256_min_pd(_mm256_mul_pd(y_transf, scale), maxCoord);
+                        __m256d z_scaled = _mm256_min_pd(_mm256_mul_pd(z_transf, scale), maxCoord);
+
+                        // Store
+                        alignas(32) double x_vals[4], y_vals[4], z_vals[4];
+                        _mm256_store_pd(x_vals, x_scaled);
+                        _mm256_store_pd(y_vals, y_scaled);
+                        _mm256_store_pd(z_vals, z_scaled);
+
+                        for (int j = 0; j < 4; ++j)
+                        {
+                            x[j] = static_cast<uint32_t>(x_vals[j]);
+                            y[j] = static_cast<uint32_t>(y_vals[j]);
+                            z[j] = static_cast<uint32_t>(z_vals[j]);
+                        }
+
+                        // Second iteration
+                        pointsX = _mm256_load_pd(soa->dataX() + i + 4);
+                        pointsY = _mm256_load_pd(soa->dataY() + i + 4);
+                        pointsZ = _mm256_load_pd(soa->dataZ() + i + 4);
+
+                        // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
+                        x_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsX, bboxCenterX), bboxRadiiX), _mm256_mul_pd(two, bboxRadiiX));
+                        y_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsY, bboxCenterY), bboxRadiiY), _mm256_mul_pd(two, bboxRadiiY));
+                        z_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsZ, bboxCenterZ), bboxRadiiZ), _mm256_mul_pd(two, bboxRadiiZ));
+
+                        // Scale to [0,2^L)^3 for morton encoding, handle edge case where coordinate could be 2^L if _transf is exactly 1.0
+                        x_scaled = _mm256_min_pd(_mm256_mul_pd(x_transf, scale), maxCoord);
+                        y_scaled = _mm256_min_pd(_mm256_mul_pd(y_transf, scale), maxCoord);
+                        z_scaled = _mm256_min_pd(_mm256_mul_pd(z_transf, scale), maxCoord);
+
+                        // Store
+                        _mm256_store_pd(x_vals, x_scaled);
+                        _mm256_store_pd(y_vals, y_scaled);
+                        _mm256_store_pd(z_vals, z_scaled);
+
+                        for (int j = 0; j < 4; ++j)
+                        {
+                            x[j + 4] = static_cast<uint32_t>(x_vals[j]);
+                            y[j + 4] = static_cast<uint32_t>(y_vals[j]);
+                            z[j + 4] = static_cast<uint32_t>(z_vals[j]);
+                        }
+
+                        encodeVectorized(x, y, z, keys, i);
+                    }
+
+                    // Process remaining items
+                    #pragma omp single nowait
+                    for (size_t i = n - (n % 4); i < n; ++i)
+                    {
+                        keys[i] = encodeFromPoint(points[i], bbox);
+                    }
+                }
+            }
+        }
+
 
     #ifdef __AVX512F__
         template <PointContainer Container>
@@ -497,6 +712,29 @@ public:
         std::vector<key_t> keys;
 
         tw.start();
+        keys = encodePoints(points, bbox);
+        tw.stop();
+        std::cout << "Encode time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
+
+
+        encodePointsVectorizedAVX2(points, bbox, keys);
+        encodePointsVectorizedAVX2(points, bbox, keys);
+        tw.start();
+        encodePointsVectorizedAVX2(points, bbox, keys);
+        tw.stop();
+        std::cout << "Encode-Vectorized-AVX2 time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
+
+        #ifdef __AVX512F__
+        encodePointsVectorizedAVX512(points, bbox, keys);
+        encodePointsVectorizedAVX512(points, bbox, keys);
+        tw.start();
+        encodePointsVectorizedAVX512(points, bbox, keys);
+        tw.stop();
+        std::cout << "Encode-Vectorized-AVX512 time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
+        #endif
+
+        /*
+        tw.start();
         keys = sortPoints<Container>(localPoints, meta_opt, bbox, log);
         tw.stop();
         std::cout << "Sorting time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
@@ -513,7 +751,9 @@ public:
         tw.stop();
         std::cout << "Sorting-Optimized time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
         isOrdered(keys);
-        isOrdered(localPoints, bbox);
+        isOrdered(localPoints, bbox);*/
+
+        exit(0);
 
         // Call the regular sortPoints with metadata
         return std::make_pair(sortPoints_Optimized<Container>(points, meta_opt, bbox, log), bbox);
