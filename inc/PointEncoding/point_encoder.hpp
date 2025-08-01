@@ -424,9 +424,9 @@ public:
                         alignas(32) uint32_t x[8], y[8], z[8];
 
                         // Load 4 elements
-                        __m256d pointsX = _mm256_load_pd(soa->dataX() + i);
-                        __m256d pointsY = _mm256_load_pd(soa->dataY() + i);
-                        __m256d pointsZ = _mm256_load_pd(soa->dataZ() + i);
+                        __m256d pointsX = _mm256_loadu_pd(soa->dataX() + i);
+                        __m256d pointsY = _mm256_loadu_pd(soa->dataY() + i);
+                        __m256d pointsZ = _mm256_loadu_pd(soa->dataZ() + i);
                         printf("Debug\n");
 
                         // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
