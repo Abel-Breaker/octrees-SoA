@@ -717,13 +717,13 @@ public:
         std::cout << "Encode time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
 
 
-        std::vector<key_t> keys2(points.size());
+        std::vector<key_t> keys2(points.size());/*
         encodePointsVectorizedAVX2(points, bbox, keys2);
         encodePointsVectorizedAVX2(points, bbox, keys2);
         tw.start();
         encodePointsVectorizedAVX2(points, bbox, keys2);
         tw.stop();
-        std::cout << "Encode-Vectorized-AVX2 time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
+        std::cout << "Encode-Vectorized-AVX2 time: " << tw.getElapsedDecimalSeconds() << " seconds\n";*/
 
         #ifdef __AVX512F__
         encodePointsVectorizedAVX512(points, bbox, keys2);
