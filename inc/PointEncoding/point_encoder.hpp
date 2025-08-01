@@ -717,19 +717,19 @@ public:
         std::cout << "Encode time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
 
 
-        keys.resize(localPoints.size());
-        encodePointsVectorizedAVX2(points, bbox, keys);
-        encodePointsVectorizedAVX2(points, bbox, keys);
+        std::vector<key_t> keys2(n);
+        encodePointsVectorizedAVX2(points, bbox, keys2);
+        encodePointsVectorizedAVX2(points, bbox, keys2);
         tw.start();
-        encodePointsVectorizedAVX2(points, bbox, keys);
+        encodePointsVectorizedAVX2(points, bbox, keys2);
         tw.stop();
         std::cout << "Encode-Vectorized-AVX2 time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
 
         #ifdef __AVX512F__
-        encodePointsVectorizedAVX512(points, bbox, keys);
-        encodePointsVectorizedAVX512(points, bbox, keys);
+        encodePointsVectorizedAVX512(points, bbox, keys2);
+        encodePointsVectorizedAVX512(points, bbox, keys2);
         tw.start();
-        encodePointsVectorizedAVX512(points, bbox, keys);
+        encodePointsVectorizedAVX512(points, bbox, keys2);
         tw.stop();
         std::cout << "Encode-Vectorized-AVX512 time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
         #endif
