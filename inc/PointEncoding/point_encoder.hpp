@@ -427,6 +427,7 @@ public:
                         __m256d pointsX = _mm256_load_pd(soa->dataX() + i);
                         __m256d pointsY = _mm256_load_pd(soa->dataY() + i);
                         __m256d pointsZ = _mm256_load_pd(soa->dataZ() + i);
+                        printf("Debug\n");
 
                         // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
                         __m256d x_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsX, bboxCenterX), bboxRadiiX), _mm256_mul_pd(two, bboxRadiiX));
@@ -717,13 +718,13 @@ public:
         std::cout << "Encode time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
 
 
-        std::vector<key_t> keys2(points.size());/*
+        std::vector<key_t> keys2(points.size());
         encodePointsVectorizedAVX2(points, bbox, keys2);
         encodePointsVectorizedAVX2(points, bbox, keys2);
         tw.start();
         encodePointsVectorizedAVX2(points, bbox, keys2);
         tw.stop();
-        std::cout << "Encode-Vectorized-AVX2 time: " << tw.getElapsedDecimalSeconds() << " seconds\n";*/
+        std::cout << "Encode-Vectorized-AVX2 time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
 
         #ifdef __AVX512F__
         encodePointsVectorizedAVX512(points, bbox, keys2);
