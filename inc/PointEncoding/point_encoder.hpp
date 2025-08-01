@@ -717,6 +717,7 @@ public:
         std::cout << "Encode time: " << tw.getElapsedDecimalSeconds() << " seconds\n";
 
 
+        keys.resize(localPoints.size());
         encodePointsVectorizedAVX2(points, bbox, keys);
         encodePointsVectorizedAVX2(points, bbox, keys);
         tw.start();
