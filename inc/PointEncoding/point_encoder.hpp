@@ -22,6 +22,7 @@ public:
 
     virtual key_t encode(coords_t x, coords_t y, coords_t z) const = 0;
     virtual void encodeVectorized(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const=0;
+    virtual void encodeVectorizedAVX2(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const =0;
     virtual void decode(key_t code, coords_t &x, coords_t &y, coords_t &z) const = 0;
 
     virtual uint32_t maxDepth() const = 0;
@@ -211,7 +212,6 @@ public:
                         __m256d pointsX = _mm256_load_pd(soa->dataX() + i);
                         __m256d pointsY = _mm256_load_pd(soa->dataY() + i);
                         __m256d pointsZ = _mm256_load_pd(soa->dataZ() + i);
-                        printf("Debug\n");
 
                         // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
                         __m256d x_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsX, bboxCenterX), bboxRadiiX), _mm256_mul_pd(two, bboxRadiiX));
@@ -263,7 +263,7 @@ public:
                             z[j + 4] = static_cast<uint32_t>(z_vals[j]);
                         }
 
-                        encodeVectorized(x, y, z, keys, i);
+                        encodeVectorizedAVX2(x, y, z, keys, i);
                     }
 
                     // Process remaining items
@@ -425,9 +425,9 @@ public:
                         alignas(32) uint32_t x[8], y[8], z[8];
 
                         // Load 4 elements
-                        __m256d pointsX = _mm256_loadu_pd(soa->dataX() + i);
-                        __m256d pointsY = _mm256_loadu_pd(soa->dataY() + i);
-                        __m256d pointsZ = _mm256_loadu_pd(soa->dataZ() + i);
+                        __m256d pointsX = _mm256_load_pd(soa->dataX() + i);
+                        __m256d pointsY = _mm256_load_pd(soa->dataY() + i);
+                        __m256d pointsZ = _mm256_load_pd(soa->dataZ() + i);
 
                         // Put physical coords into the unit cube: ((p - center) + radii) / (2 * radii)
                         __m256d x_transf = _mm256_div_pd(_mm256_add_pd(_mm256_sub_pd(pointsX, bboxCenterX), bboxRadiiX), _mm256_mul_pd(two, bboxRadiiX));
