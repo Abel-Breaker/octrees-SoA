@@ -27,23 +27,18 @@ public:
      * but with some extra rotations and reflections in each step.
      */
     key_t encode(coords_t x, coords_t y, coords_t z) const override {
-        // Debug: Print initial values
         key_t key = 0;
+
         for(int level = MAX_DEPTH - 1; level >= 0; level--) {
 
-            
             // Find octant and append to the key (same as Morton codes)
             const uint32_t xi = (x >> level) & 1u;
             const uint32_t yi = (y >> level) & 1u;
             const uint32_t zi = (z >> level) & 1u;
             const uint32_t octant = (xi << 2) | (yi << 1) | zi;
-            
 
-            
             key <<= 3;
             key |= mortonToHilbert[octant];
-            
-
             
             // Store coordinates before XOR operations for comparison
             uint32_t x_before = x, y_before = y, z_before = z;
@@ -53,7 +48,6 @@ public:
             x ^= -(xi & ((!yi) | zi));
             y ^= -((xi & (yi | zi)) | (yi & (!zi)));
             z ^= -((xi & (!yi) & (!zi)) | (yi & (!zi)));
-
 
             // Store coordinates before rotation/swap for comparison
             uint32_t x_before_rot = x, y_before_rot = y, z_before_rot = z;
@@ -67,10 +61,7 @@ public:
                 uint32_t temp = x;
                 x = z, z = temp;
             }
-            
         }
-        
-
         return key;
     }
 
@@ -112,8 +103,8 @@ public:
             __m512i hilbertVals = _mm512_permutexvar_epi32(octant, lookup_table_mortonToHilbert);
 
             // Expand Morton to Hilbert (16x uint32_t) to 16x uint64_t
-            __m256i lo = _mm512_castsi512_si256(hilbertVals);       // primeros 8
-            __m256i hi = _mm512_extracti32x8_epi32(hilbertVals, 1); // últimos 8
+            __m256i lo = _mm512_castsi512_si256(hilbertVals);       // first 8
+            __m256i hi = _mm512_extracti32x8_epi32(hilbertVals, 1); // last 8
 
             __m512i hilbertVals_lo = _mm512_cvtepu32_epi64(lo); // 8 x uint64_t
             __m512i hilbertVals_hi = _mm512_cvtepu32_epi64(hi); // 8 x uint64_t
@@ -169,11 +160,6 @@ public:
         _mm512_storeu_si512((__m512i *)&keys[i + 8], key_hi);
     }
 #else
-    /**
-     * @brief Encodes the given integer coordinates in the range [0,2^MAX_DEPTH]x[0,2^MAX_DEPTH]x[0,2^MAX_DEPTH] into their Hilbert key
-     * The algorithm is described in the citations above but consists on something similar to the intertwinement of bits of Morton codes
-     * but with some extra rotations and reflections in each step.
-     */
     void encodeVectorized(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const override
     {
 
@@ -263,98 +249,9 @@ public:
         _mm256_storeu_si256((__m256i *)&keys[i], key_lo);
         _mm256_storeu_si256((__m256i *)&keys[i + 4], key_hi);
     }
-#endif // __AVX512F__
+#endif
 
-    void encodeVectorizedAVX2(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const override
-    {
-
-        //  Initialize 64-bit keys as 2 separate vectors since they are size_t and we are working with uint32
-        __m256i key_lo = _mm256_setzero_si256(); // For elements 0–3
-        __m256i key_hi = _mm256_setzero_si256(); // For elements 4–7
-
-        // Load the data
-        __m256i vx = _mm256_load_si256((__m256i *)(const uint32_t *)x);
-        __m256i vy = _mm256_load_si256((__m256i *)(const uint32_t *)y);
-        __m256i vz = _mm256_load_si256((__m256i *)(const uint32_t *)z);
-
-        __m256i one = _mm256_set1_epi32(1);
-        __m256i zero = _mm256_setzero_si256();
-        __m256i lookup_table_mortonToHilbert = _mm256_setr_epi32(0u, 1u, 3u, 2u, 7u, 6u, 4u, 5u);
-
-        alignas(32) uint32_t zi_arr[8], yi_arr[8]; // For rotations
-
-        for (int level = MAX_DEPTH - 1; level >= 0; level--)
-        {
-
-            // Find octant and append to the key (same as Morton codes)
-            __m256i shift = _mm256_set1_epi32(level);
-
-            // (x >> level) & 1u;
-            __m256i xi = _mm256_and_si256(_mm256_srlv_epi32(vx, shift), one);
-            __m256i yi = _mm256_and_si256(_mm256_srlv_epi32(vy, shift), one);
-            __m256i zi = _mm256_and_si256(_mm256_srlv_epi32(vz, shift), one);
-
-            __m256i octant = _mm256_or_si256(_mm256_or_si256(_mm256_slli_epi32(xi, 2), _mm256_slli_epi32(yi, 1)), zi);
-
-            __m256i hilbertVals = _mm256_permutevar8x32_epi32(lookup_table_mortonToHilbert, octant);
-
-            // Expand Morton to Hilbert (8x uint32_t) to 8x uint64_t
-            __m128i mth_lo = _mm256_extracti128_si256(hilbertVals, 0);
-            __m128i mth_hi = _mm256_extracti128_si256(hilbertVals, 1);
-            __m256i mth64_lo = _mm256_cvtepu32_epi64(mth_lo); // 4x uint64_t
-            __m256i mth64_hi = _mm256_cvtepu32_epi64(mth_hi); // 4x uint64_t
-
-            // Shift keys and combine them
-            key_lo = _mm256_slli_epi64(key_lo, 3);
-            key_hi = _mm256_slli_epi64(key_hi, 3);
-            key_lo = _mm256_or_si256(key_lo, mth64_lo);
-            key_hi = _mm256_or_si256(key_hi, mth64_hi);
-
-            // Turn x, y, z (Karnaugh mapped operations, check citation and Lam and Shapiro paper detailing 2D case
-            // for understanding how this works)
-            __m256i not_yi = _mm256_xor_si256(yi, one);
-            __m256i not_zi = _mm256_xor_si256(zi, one);
-
-            __m256i cond_x = _mm256_and_si256(xi, _mm256_or_si256(not_yi, zi));
-            __m256i mask_x = _mm256_sub_epi32(zero, cond_x);
-            vx = _mm256_xor_si256(vx, mask_x);
-
-            __m256i cond_y = _mm256_or_si256(_mm256_and_si256(xi, _mm256_or_si256(yi, zi)),
-                                             _mm256_and_si256(yi, not_zi));
-            __m256i mask_y = _mm256_sub_epi32(zero, cond_y);
-            vy = _mm256_xor_si256(vy, mask_y);
-
-            __m256i cond_z = _mm256_or_si256(_mm256_and_si256(xi, _mm256_and_si256(not_yi, not_zi)),
-                                             _mm256_and_si256(yi, not_zi));
-            __m256i mask_z = _mm256_sub_epi32(zero, cond_z);
-            vz = _mm256_xor_si256(vz, mask_z);
-
-            // rot_mask = zi ? 0xFFFFFFFF : 0x00000000
-            __m256i rot_mask = _mm256_cmpeq_epi32(zi, one);
-
-            // swap_mask = (!zi && !yi) ? 0xFFFFFFFF : 0x00000000
-            __m256i swap_mask = _mm256_and_si256(
-                _mm256_cmpeq_epi32(zi, zero),
-                _mm256_cmpeq_epi32(yi, zero));
-
-            // Rot: tx = ty, ty = tz, tz = tx (original) when zi == 1
-            __m256i tx_orig = vx;
-            vx = _mm256_blendv_epi8(vx, vy, rot_mask);      // tx = ty
-            vy = _mm256_blendv_epi8(vy, vz, rot_mask);      // ty = tz
-            vz = _mm256_blendv_epi8(vz, tx_orig, rot_mask); // tz = tx original
-
-            // Swap between tx and tz when (!zi && !yi)
-            __m256i tmp_vx = _mm256_blendv_epi8(vx, vz, swap_mask);
-            __m256i tmp_vz = _mm256_blendv_epi8(vz, vx, swap_mask);
-            vx = tmp_vx;
-            vz = tmp_vz;
-        }
-
-        // Store the final key
-        _mm256_storeu_si256((__m256i *)&keys[i], key_lo);
-        _mm256_storeu_si256((__m256i *)&keys[i + 4], key_hi);
-    }
-
+    
     /// @brief Decodes the given key and puts the coordinates into x, y, z
     void decode(key_t code, coords_t &x, coords_t &y, coords_t &z) const override {
         // Initialize the coords values
