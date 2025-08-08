@@ -65,7 +65,7 @@ public:
         return key;
     }
 
-#ifdef __AVX512F__
+#if defined(__AVX512F__) && defined(__AVX512DQ__)
     void encodeVectorized(const uint32_t *x, const uint32_t *y, const uint32_t *z, std::vector<key_t> &keys, size_t i) const override
     {
         // Load the data
