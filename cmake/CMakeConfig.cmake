@@ -29,17 +29,25 @@ else()
     message(WARNING "AVX-512 not supported by the compiler")
 endif()
 
+CHECK_CXX_COMPILER_FLAG("-mavx512dq" COMPILER_SUPPORTS_AVX512DQ)
+
+if(COMPILER_SUPPORTS_AVX512DQ)
+    set(AVX512DQ_FLAGS "-mavx512dq")
+else()
+    message(WARNING "AVX-512DQ not supported by the compiler")
+endif()
+
 # Unir flags compatibles
-set(CMAKE_CXX_FLAGS "${AVX2_FLAGS} ${BMI2_FLAGS}")
+set(CMAKE_CXX_FLAGS "${AVX2_FLAGS} ${BMI2_FLAGS}") # Add AVX512_FLAGS and AVX512DQ_FLAGS if supported
 
 # Setup compiler flags
 set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG -w ${CMAKE_CXX_FLAGS}")
 set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g ${CMAKE_CXX_FLAGS}")
 
-# Agrega un nuevo tipo de build
+# new Profile build type for tool perf
 set(CMAKE_CXX_FLAGS_PROFILE "-O2 -g -fno-omit-frame-pointer ${CMAKE_CXX_FLAGS}")
 
-# Habilita el tipo de build
+# Set profile type
 set(CMAKE_BUILD_TYPE "Profile" CACHE STRING "Build type")
 
 # Asignar flags si el tipo de build es "Profile"
